@@ -1,0 +1,165 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.EntityFrameworkCore
+@using StudentWorkLibrary.Models
+@using StudentWorkLibrary.Data
+@using StudentWorkLibrary.Services
+
+@inject IWorkSearchService SearchService
+@inject NavigationManager Navigation
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+
+<h1>📚 Библиотека студенческих работ</h1>
+
+<div class="row mb-4">
+    <div class="col-md-8">
+        <input type="text" class="form-control form-control-lg"
+               placeholder="Поиск по названию, автору, ключевым словам..."
+               @bind="searchQuery" @bind:event="oninput" @onkeydown="HandleSearchEnter" />
+    </div>
+    <div class="col-md-4 d-flex gap-2">
+        <button class="btn btn-primary btn-lg flex-grow-1" @onclick="Search">🔍 Поиск</button>
+        <button class="btn btn-outline-secondary btn-lg" @onclick="ClearFilters">Сброс</button>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-3">
+        <div class="card mb-3">
+            <div class="card-header fw-bold">🗂 Фильтры</div>
+            <div class="card-body">
+                <label class="form-label">Тип работы</label>
+                <select class="form-select mb-3" @bind="selectedWorkTypeId">
+                    <option value="">Все</option>
+                    @foreach (var type in workTypes)
+                    {
+                        <option value="@type.Id">@type.Name</option>
+                    }
+                </select>
+
+                <label class="form-label">ВУЗ</label>
+                <select class="form-select mb-3" @bind="selectedInstitutionId">
+                    <option value="">Все</option>
+                    @foreach (var inst in institutions)
+                    {
+                        <option value="@inst.Id">@inst.Name</option>
+                    }
+                </select>
+
+                <label class="form-label">Специальность</label>
+                <select class="form-select mb-3" @bind="selectedSpecialtyId">
+                    <option value="">Все</option>
+                    @foreach (var spec in specialties)
+                    {
+                        <option value="@spec.Id">@spec.Name (@spec.Code)</option>
+                    }
+                </select>
+
+                <label class="form-label">Год</label>
+                <input type="number" class="form-control mb-3" @bind="selectedYear" placeholder="Например: 2024" />
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-9">
+        @if (isLoading)
+        {
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <span class="ms-2">Загрузка...</span>
+            </div>
+        }
+        else if (!works.Any())
+        {
+            <div class="alert alert-info">🔍 Работ не найдено. Попробуйте изменить фильтры.</div>
+        }
+        else
+        {
+            @foreach (var work in works)
+            {
+                <div class="card mb-3" @key="work.Id">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <h5 class="card-title mb-1">@work.Title</h5>
+                            <span class="badge bg-success fs-6">⬇ @work.DownloadCount</span>
+                        </div>
+                        <div class="mb-2 mt-2">
+                            <span class="badge bg-primary">@work.WorkType?.Name</span>
+                            <span class="badge bg-secondary">@work.Specialty?.Name</span>
+                            <span class="badge bg-info text-dark">@work.Year</span>
+                            <span class="badge bg-warning text-dark">@work.Specialty?.Institution?.Name</span>
+                        </div>
+                        <p class="card-text mb-2">
+                            <strong>Автор:</strong> @(string.IsNullOrEmpty(work.Author) ? "Не указан" : work.Author)<br />
+                            @if (!string.IsNullOrEmpty(work.Abstract))
+                            {
+                                <small class="text-muted d-block mt-1">@work.Abstract[..Math.Min(150, work.Abstract.Length)]...</small>
+                            }
+                        </p>
+                        <button class="btn btn-sm btn-outline-primary mt-2" @onclick="() => DownloadWork(work.Id)">
+                            📥 Скачать файл
+                        </button>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private string searchQuery = "";
+    private int? selectedWorkTypeId, selectedInstitutionId, selectedSpecialtyId, selectedYear;
+    private List<StudentWork> works = new();
+    private List<WorkType> workTypes = new();
+    private List<Institution> institutions = new();
+    private List<Specialty> specialties = new();
+    private bool isLoading = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadFilters();
+        await Search();
+    }
+
+    private async Task LoadFilters()
+    {
+        using var ctx = DbContextFactory.CreateDbContext();
+        workTypes = await ctx.WorkTypes.OrderBy(t => t.Name).ToListAsync();
+        institutions = await ctx.Institutions.OrderBy(i => i.Name).ToListAsync();
+        // Загружаем специальности вместе с ВУЗами для корректного отображения
+        specialties = await ctx.Specialties.Include(s => s.Institution).OrderBy(s => s.Name).ToListAsync();
+    }
+
+    private async Task Search()
+    {
+        isLoading = true;
+        try
+        {
+            // Вызов соответствует обновлённой сигнатуре WorkSearchService
+            works = await SearchService.SearchAsync(
+                searchQuery?.Trim(),
+                selectedWorkTypeId,
+                selectedInstitutionId,
+                selectedSpecialtyId,
+                selectedYear);
+        }
+        finally { isLoading = false; }
+    }
+
+    private async Task ClearFilters()
+    {
+        searchQuery = "";
+        selectedWorkTypeId = selectedInstitutionId = selectedSpecialtyId = selectedYear = null;
+        await Search();
+    }
+
+    private void HandleSearchEnter(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Search();
+    }
+
+    private void DownloadWork(int workId)
+    {
+        Navigation.NavigateTo($"/api/download/{workId}", true);
+    }
+}

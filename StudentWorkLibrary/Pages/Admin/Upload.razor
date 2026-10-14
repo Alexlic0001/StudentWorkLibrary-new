@@ -1,0 +1,176 @@
+﻿@page "/admin/upload"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using StudentWorkLibrary.Data
+@using StudentWorkLibrary.Models
+@using StudentWorkLibrary.Services
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject IFileService FileService
+@inject NavigationManager Navigation
+@* @attribute [Authorize(Roles = "Admin")] *@
+
+<h3>Загрузка новой работы</h3>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        @errorMessage
+        <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+    </div>
+}
+
+<EditForm Model="@newWork" OnValidSubmit="@HandleSubmit">
+    <DataAnnotationsValidator />
+    <div class="row">
+        <div class="col-md-6">
+            <div class="mb-3">
+                <label class="form-label">Название работы *</label>
+                <InputText class="form-control" @bind-Value="newWork.Title" />
+                <ValidationMessage For="@(() => newWork.Title)" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Автор</label>
+                <InputText class="form-control" @bind-Value="newWork.Author" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Год</label>
+                <InputNumber class="form-control" @bind-Value="newWork.Year" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Тип работы *</label>
+                <InputSelect class="form-control" @bind-Value="newWork.WorkTypeId">
+                    <option value="">Выберите тип</option>
+                    @foreach (var type in workTypes)
+                    {
+                        <option value="@type.Id">@type.Name</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="@(() => newWork.WorkTypeId)" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Специальность *</label>
+                <InputSelect class="form-control" @bind-Value="newWork.SpecialtyId">
+                    <option value="">Выберите специальность</option>
+                    @foreach (var spec in specialties)
+                    {
+                        <option value="@spec.Id">@spec.Name (@spec.Code)</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="@(() => newWork.SpecialtyId)" />
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="mb-3">
+                <label class="form-label">Аннотация</label>
+                <InputTextArea class="form-control" rows="3" @bind-Value="newWork.Abstract" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Ключевые слова</label>
+                <InputText class="form-control" @bind-Value="newWork.Keywords" />
+                <small class="text-muted">Через запятую</small>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Файл *</label>
+                <InputFile class="form-control" OnChange="@OnFileSelected" />
+                @if (selectedFile is not null)
+                {
+                    <div class="mt-2">
+                        <strong>Выбран файл:</strong> @selectedFile.Name (@(selectedFile.Size / 1024) KB)
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" disabled="@isUploading">
+        @(isUploading ? "Загрузка..." : "Загрузить работу")
+    </button>
+</EditForm>
+
+@code {
+    private StudentWork newWork = new();
+    private List<WorkType> workTypes = new();
+    private List<Specialty> specialties = new();
+    private IBrowserFile? selectedFile;
+    private bool isUploading = false;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        workTypes = await DbContext.WorkTypes.ToListAsync();
+        specialties = await DbContext.Specialties.Include(s => s.Institution).ToListAsync();
+    }
+
+    private void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        errorMessage = null;
+    }
+
+    private async Task HandleSubmit()
+    {
+        errorMessage = null;
+
+        if (selectedFile is null)
+        {
+            errorMessage = "Пожалуйста, выберите файл для загрузки.";
+            StateHasChanged();
+            return;
+        }
+
+        isUploading = true;
+        StateHasChanged();
+
+        try
+        {
+            var workType = workTypes.FirstOrDefault(wt => wt.Id == newWork.WorkTypeId);
+            var specialty = specialties.FirstOrDefault(s => s.Id == newWork.SpecialtyId);
+
+            var workTypeName = workType?.Name ?? "Без_типа";
+            var institutionName = specialty?.Institution?.Name ?? "Без_ВУЗа";
+            var year = newWork.Year ?? DateTime.Now.Year;
+
+            var filePath = await FileService.SaveFileAsync(selectedFile, workTypeName, institutionName, year);
+
+            // ВАЖНО: WorkTypeId и SpecialtyId теперь int? — нужно разыменовать
+            var entity = new StudentWork
+            {
+                Title = newWork.Title,
+                Author = newWork.Author,
+                Year = newWork.Year,
+                Abstract = newWork.Abstract,
+                Keywords = newWork.Keywords,
+                FilePath = filePath,
+                OriginalFileName = selectedFile.Name,
+                FileSize = selectedFile.Size,
+                UploadDate = DateTime.UtcNow,
+                WorkTypeId = newWork.WorkTypeId!.Value,
+                SpecialtyId = newWork.SpecialtyId!.Value
+            };
+
+            DbContext.StudentWorks.Add(entity);
+            await DbContext.SaveChangesAsync();
+
+            Navigation.NavigateTo("/", true);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Ошибка загрузки: {ex.Message}";
+            Console.WriteLine($"[UPLOAD ERROR] {ex}");
+            StateHasChanged();
+        }
+        finally
+        {
+            isUploading = false;
+            StateHasChanged();
+        }
+    }
+}
