@@ -1,0 +1,11 @@
+﻿@page "/logout"
+@using Microsoft.AspNetCore.Identity
+@inject SignInManager<IdentityUser> SignInManager
+
+@functions {
+    public async Task<IActionResult> OnGetAsync()
+    {
+        await SignInManager.SignOutAsync();
+        return LocalRedirect("/");
+    }
+}

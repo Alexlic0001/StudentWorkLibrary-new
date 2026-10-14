@@ -1,19 +1,22 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using StudentWorkLibrary;
+using StudentWorkLibrary.Components;
 using StudentWorkLibrary.Data;
 using StudentWorkLibrary.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Настройка подключения к SQLite
+// SQLite
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Data Source=StudentWorkLibrary.db";
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
+
+builder.Services.AddDbContextFactory<ApplicationDbContext>(options =>
     options.UseSqlite(connectionString));
 
 builder.Services.AddDatabaseDeveloperPageExceptionFilter();
 
-// Настройка Identity
+// Identity
 builder.Services.AddDefaultIdentity<IdentityUser>(options =>
 {
     options.SignIn.RequireConfirmedAccount = false;
@@ -25,24 +28,29 @@ builder.Services.AddDefaultIdentity<IdentityUser>(options =>
 .AddRoles<IdentityRole>()
 .AddEntityFrameworkStores<ApplicationDbContext>();
 
-// Добавление сервисов
+// Blazor Web App
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+builder.Services.AddCascadingAuthenticationState();
+
+// Свои сервисы
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IWorkSearchService, WorkSearchService>();
 
-// Добавление сервисов Razor Pages и Blazor
+// Razor Pages (Login/Logout) + Controllers (Download)
 builder.Services.AddRazorPages();
-builder.Services.AddServerSideBlazor();
+builder.Services.AddControllers();
 
 var app = builder.Build();
 
-// Создание базы данных и ролей при запуске
+// Seed
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     await SeedData.InitializeAsync(services);
 }
 
-// Настройка pipeline
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
@@ -56,8 +64,14 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Antiforgery нужен для Blazor Web App
+app.UseAntiforgery();
+
 app.MapRazorPages();
-app.MapBlazorHub();
-app.MapFallbackToPage("/_Host");
+app.MapControllers();
+app.MapGet("/api/test", () => "API works");
+// Blazor
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
 
 app.Run();

@@ -1,4 +1,8 @@
 ﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthProvider
 
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
@@ -11,16 +15,34 @@
                 <li class="nav-item">
                     <a class="nav-link" href="/">Главная</a>
                 </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="/admin/upload">📤 Загрузить работу</a>
-                </li>
+                @if (isAuthenticated && isAdmin)
+                {
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/upload">📤 Загрузить работу</a>
+                    </li>
+                }
+                @if (isAuthenticated)
+                {
+                    <li class="nav-item">
+                        <span class="nav-link text-info">👤 @userEmail</span>
+                    </li>
+                    <li class="nav-item">
+                        <button class="btn btn-outline-danger btn-sm ms-2" @onclick="Logout">Выйти</button>
+                    </li>
+                }
+                else
+                {
+                    <li class="nav-item">
+                        <a class="btn btn-outline-primary btn-sm ms-2" href="/login">Войти</a>
+                    </li>
+                }
             </ul>
         </div>
     </div>
 </nav>
 
-<main>
-    @ChildContent
+<main class="container mt-3">
+    @Body
 </main>
 
 <footer class="border-top footer text-muted mt-4">
@@ -28,17 +50,6 @@
         &copy; 2024 - Библиотека студенческих работ
     </div>
 </footer>
-
-<div id="blazor-error-ui">
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
-    <a class="dismiss">🗙</a>
-</div>
-
-@code {
-    [Parameter]
-    public RenderFragment? ChildContent { get; set; }
-}
 
 <style>
     .footer {
@@ -58,3 +69,41 @@
         margin-bottom: 60px;
     }
 </style>
+
+@code {
+    private bool isAuthenticated = false;
+    private bool isAdmin = false;
+    private string userEmail = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        isAuthenticated = user.Identity?.IsAuthenticated ?? false;
+
+        if (isAuthenticated)
+        {
+            userEmail = user.Identity?.Name ?? "";
+            isAdmin = user.IsInRole("Admin");
+        }
+
+        AuthProvider.AuthenticationStateChanged += async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                var newState = await AuthProvider.GetAuthenticationStateAsync();
+                var newUser = newState.User;
+                isAuthenticated = newUser.Identity?.IsAuthenticated ?? false;
+                userEmail = newUser.Identity?.Name ?? "";
+                isAdmin = newUser.IsInRole("Admin");
+                StateHasChanged();
+            });
+        };
+    }
+
+    private void Logout()
+    {
+        Navigation.NavigateTo("/logout", true);
+    }
+}

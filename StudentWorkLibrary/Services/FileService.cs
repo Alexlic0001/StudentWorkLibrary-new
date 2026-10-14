@@ -1,13 +1,12 @@
 ﻿using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Hosting;
+using System.Text;
 
 namespace StudentWorkLibrary.Services
 {
     public interface IFileService
     {
         Task<string> SaveFileAsync(IBrowserFile file, string workTypeName, string institutionName, int? year);
-        Task<bool> DeleteFileAsync(string filePath);
-        string GetFileUrl(string filePath);
     }
 
     public class FileService : IFileService
@@ -32,49 +31,111 @@ namespace StudentWorkLibrary.Services
             if (file.Size > MaxFileSize)
                 throw new InvalidOperationException($"Файл превышает допустимый размер ({MaxFileSize / 1048576} MB).");
 
-            // Санитизация имён папок
-            var safeWorkType = SanitizeFolderName(workTypeName);
-            var safeInstitution = SanitizeFolderName(institutionName);
+            // ASCII-slug для папок: транслитерация кириллицы + замена недопустимых символов
+            var safeWorkType = ToAsciiSlug(workTypeName);
+            var safeInstitution = ToAsciiSlug(institutionName);
             var yearFolder = year?.ToString() ?? DateTime.Now.Year.ToString();
 
             var uploadDir = Path.Combine(_environment.WebRootPath, "uploads", safeWorkType, safeInstitution, yearFolder);
             Directory.CreateDirectory(uploadDir);
 
-            var uniqueName = $"{Guid.NewGuid():N}_{DateTime.Now:yyyyMMddHHmmss}_{file.Name}";
+            // Безопасное имя файла: только GUID + timestamp + расширение
+            var uniqueName = $"{Guid.NewGuid():N}_{DateTime.Now:yyyyMMddHHmmss}{ext}";
             var filePath = Path.Combine(uploadDir, uniqueName);
 
-            using var stream = new FileStream(filePath, FileMode.Create);
+            await using var stream = new FileStream(filePath, FileMode.Create);
             await file.OpenReadStream(MaxFileSize).CopyToAsync(stream);
 
-            // Возвращаем путь относительно wwwroot
+            // В БД храним относительный путь с прямыми слэшами
             return $"uploads/{safeWorkType}/{safeInstitution}/{yearFolder}/{uniqueName}";
         }
 
-        public async Task<bool> DeleteFileAsync(string filePath)
+        private static string ToAsciiSlug(string name)
         {
-            try
-            {
-                var fullPath = Path.Combine(_environment.WebRootPath, filePath);
-                if (File.Exists(fullPath))
-                {
-                    File.Delete(fullPath);
-                }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Ошибка удаления файла: {FilePath}", filePath);
-                return false;
-            }
-        }
+            if (string.IsNullOrWhiteSpace(name)) return "unknown";
 
-        public string GetFileUrl(string filePath) => $"/{filePath.Replace('\\', '/')}";
+            var map = new Dictionary<char, string>
+            {
+                ['а'] = "a",
+                ['б'] = "b",
+                ['в'] = "v",
+                ['г'] = "g",
+                ['д'] = "d",
+                ['е'] = "e",
+                ['ё'] = "e",
+                ['ж'] = "zh",
+                ['з'] = "z",
+                ['и'] = "i",
+                ['й'] = "y",
+                ['к'] = "k",
+                ['л'] = "l",
+                ['м'] = "m",
+                ['н'] = "n",
+                ['о'] = "o",
+                ['п'] = "p",
+                ['р'] = "r",
+                ['с'] = "s",
+                ['т'] = "t",
+                ['у'] = "u",
+                ['ф'] = "f",
+                ['х'] = "h",
+                ['ц'] = "ts",
+                ['ч'] = "ch",
+                ['ш'] = "sh",
+                ['щ'] = "sch",
+                ['ъ'] = "",
+                ['ы'] = "y",
+                ['ь'] = "",
+                ['э'] = "e",
+                ['ю'] = "yu",
+                ['я'] = "ya",
+                ['А'] = "A",
+                ['Б'] = "B",
+                ['В'] = "V",
+                ['Г'] = "G",
+                ['Д'] = "D",
+                ['Е'] = "E",
+                ['Ё'] = "E",
+                ['Ж'] = "Zh",
+                ['З'] = "Z",
+                ['И'] = "I",
+                ['Й'] = "Y",
+                ['К'] = "K",
+                ['Л'] = "L",
+                ['М'] = "M",
+                ['Н'] = "N",
+                ['О'] = "O",
+                ['П'] = "P",
+                ['Р'] = "R",
+                ['С'] = "S",
+                ['Т'] = "T",
+                ['У'] = "U",
+                ['Ф'] = "F",
+                ['Х'] = "H",
+                ['Ц'] = "Ts",
+                ['Ч'] = "Ch",
+                ['Ш'] = "Sh",
+                ['Щ'] = "Sch",
+                ['Ъ'] = "",
+                ['Ы'] = "Y",
+                ['Ь'] = "",
+                ['Э'] = "E",
+                ['Ю'] = "Yu",
+                ['Я'] = "Ya",
+            };
 
-        private string SanitizeFolderName(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name)) return "Unknown";
-            return string.Join("_", name.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries))
-                .Replace(" ", "_").Replace("/", "_");
+            var sb = new StringBuilder();
+            foreach (var ch in name)
+            {
+                if (map.TryGetValue(ch, out var tr))
+                    sb.Append(tr);
+                else if (char.IsLetterOrDigit(ch))
+                    sb.Append(ch);
+                else
+                    sb.Append('_');
+            }
+
+            return sb.ToString().Trim('_');
         }
     }
 }

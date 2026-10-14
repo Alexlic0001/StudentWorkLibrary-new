@@ -1,0 +1,117 @@
+﻿@page "/login"
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Mvc.RazorPages
+@attribute [IgnoreAntiforgeryToken]
+@inject SignInManager<IdentityUser> SignInManager
+
+@{
+    Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Вход - Библиотека студенческих работ</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+    <link href="~/css/site.css" rel="stylesheet" />
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center mt-5">
+            <div class="col-md-6 col-lg-4">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white text-center">
+                        <h4>📚 Вход в систему</h4>
+                    </div>
+                    <div class="card-body">
+                        @if (!string.IsNullOrEmpty(ErrorMessage))
+                        {
+                            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                                @ErrorMessage
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        }
+
+                        <form method="post">
+                            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+
+                            <div class="mb-3">
+                                <label class="form-label">Email</label>
+                                <input type="email" name="username" class="form-control"
+                                       placeholder="admin@library.com" required autofocus />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Пароль</label>
+                                <input type="password" name="password" class="form-control"
+                                       placeholder="••••••" required />
+                            </div>
+
+                            <div class="d-grid gap-2">
+                                <button type="submit" class="btn btn-primary btn-lg">
+                                    Войти
+                                </button>
+                            </div>
+                        </form>
+
+                        <hr />
+
+                        <div class="alert alert-info mt-3">
+                            <strong>ℹ️ Тестовый администратор:</strong><br />
+                            Email: <code>admin@library.com</code><br />
+                            Пароль: <code>Admin123!</code>
+                        </div>
+
+                        <div class="text-center mt-3">
+                            <a href="/" class="text-decoration-none">← Вернуться на главную</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+@functions {
+    public string ReturnUrl { get; set; } = "/";
+    public string ErrorMessage { get; set; } = "";
+
+    public void OnGet(string? returnUrl = "/")
+    {
+        ReturnUrl = returnUrl ?? "/";
+    }
+
+    public async Task<IActionResult> OnPostAsync(string username, string password, string? returnUrl = "/")
+    {
+        ReturnUrl = returnUrl ?? "/";
+
+        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+        {
+            ErrorMessage = "Пожалуйста, введите email и пароль";
+            return Page();
+        }
+
+        var result = await SignInManager.PasswordSignInAsync(username, password, true, lockoutOnFailure: false);
+
+        if (result.Succeeded)
+        {
+            return LocalRedirect(ReturnUrl);
+        }
+
+        if (result.IsLockedOut)
+        {
+            ErrorMessage = "Аккаунт заблокирован. Попробуйте позже.";
+        }
+        else
+        {
+            ErrorMessage = "Неверный email или пароль";
+        }
+
+        return Page();
+    }
+}

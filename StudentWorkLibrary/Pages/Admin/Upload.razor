@@ -1,6 +1,8 @@
 ﻿@page "/admin/upload"
+@rendermode RenderMode.InteractiveServer
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Web
 @using StudentWorkLibrary.Data
 @using StudentWorkLibrary.Models
 @using StudentWorkLibrary.Services
@@ -8,7 +10,7 @@
 @inject ApplicationDbContext DbContext
 @inject IFileService FileService
 @inject NavigationManager Navigation
-@* @attribute [Authorize(Roles = "Admin")] *@
+@attribute [Authorize(Roles = "Admin")]
 
 <h3>Загрузка новой работы</h3>
 
@@ -82,7 +84,7 @@
                 <InputFile class="form-control" OnChange="@OnFileSelected" />
                 @if (selectedFile is not null)
                 {
-                    <div class="mt-2">
+                    <div class="mt-2 text-success">
                         <strong>Выбран файл:</strong> @selectedFile.Name (@(selectedFile.Size / 1024) KB)
                     </div>
                 }
@@ -118,6 +120,7 @@
     private async Task HandleSubmit()
     {
         errorMessage = null;
+        Console.WriteLine("[UPLOAD] HandleSubmit called");
 
         if (selectedFile is null)
         {
@@ -140,7 +143,7 @@
 
             var filePath = await FileService.SaveFileAsync(selectedFile, workTypeName, institutionName, year);
 
-            // ВАЖНО: WorkTypeId и SpecialtyId теперь int? — нужно разыменовать
+            // Разыменовываем nullable FK
             var entity = new StudentWork
             {
                 Title = newWork.Title,
@@ -152,6 +155,7 @@
                 OriginalFileName = selectedFile.Name,
                 FileSize = selectedFile.Size,
                 UploadDate = DateTime.UtcNow,
+                DownloadCount = 0,
                 WorkTypeId = newWork.WorkTypeId!.Value,
                 SpecialtyId = newWork.SpecialtyId!.Value
             };
