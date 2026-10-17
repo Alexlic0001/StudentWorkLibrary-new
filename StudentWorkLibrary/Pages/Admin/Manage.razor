@@ -1,0 +1,607 @@
+﻿@page "/admin/manage"
+@rendermode RenderMode.InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@using StudentWorkLibrary.Data
+@using StudentWorkLibrary.Models
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+@attribute [Authorize(Roles = "Admin")]
+
+<h3>⚙️ Панель управления</h3>
+
+@if (!string.IsNullOrEmpty(message))
+{
+    <div class="alert alert-@(isError ? "danger" : "success") alert-dismissible fade show">
+        @message
+        <button type="button" class="btn-close" @onclick="() => message = null"></button>
+    </div>
+}
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <button class="nav-link @(tab == "works" ? "active" : "")"
+                @onclick="@(() => tab = "works")">
+            📚 Работы
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(tab == "types" ? "active" : "")"
+                @onclick="@(() => tab = "types")">
+            🗂 Типы работ
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(tab == "inst" ? "active" : "")"
+                @onclick="@(() => tab = "inst")">
+            🏛 Вузы и специальности
+        </button>
+    </li>
+</ul>
+
+@* ================= ВКЛАДКА: РАБОТЫ ================= *@
+@if (tab == "works")
+{
+    @if (editingWork is not null)
+    {
+        <div class="card mb-3 border-primary">
+            <div class="card-header bg-primary text-white">
+                ✏️ Редактирование работы #@editingWork.Id
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Название *</label>
+                        <input class="form-control" @bind="editingWork.Title" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Автор</label>
+                        <input class="form-control" @bind="editingWork.Author" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Год</label>
+                        <input type="number" class="form-control" @bind="editingWork.Year" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Тип работы *</label>
+                        <select class="form-select" @bind="editingWork.WorkTypeId">
+                            @foreach (var t in workTypes)
+                            {
+                                <option value="@t.Id">@t.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Специальность *</label>
+                        <select class="form-select" @bind="editingWork.SpecialtyId">
+                            @foreach (var s in specialties)
+                            {
+                                <option value="@s.Id">@s.Name (@s.Code) — @s.Institution?.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Аннотация</label>
+                        <textarea class="form-control" rows="2" @bind="editingWork.Abstract"></textarea>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Ключевые слова</label>
+                        <input class="form-control" @bind="editingWork.Keywords" />
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-success" @onclick="SaveWork">💾 Сохранить</button>
+                    <button class="btn btn-secondary ms-2" @onclick="() => editingWork = null">Отмена</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle w-100">
+            <thead class="table-dark">
+                <tr>
+                    <th style="width:50px;">ID</th>
+                    <th>Название</th>
+                    <th style="width:120px;">Автор</th>
+                    <th style="width:140px;">Тип</th>
+                    <th style="width:140px;">Специальность</th>
+                    <th style="width:70px;">Год</th>
+                    <th style="width:80px;">⬇</th>
+                    <th style="width:110px;">Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var w in allWorks)
+                {
+                    <tr @key="w.Id">
+                        <td>@w.Id</td>
+                        <td>@w.Title</td>
+                        <td>@w.Author</td>
+                        <td><span class="badge bg-primary">@w.WorkType?.Name</span></td>
+                        <td>@w.Specialty?.Name</td>
+                        <td class="text-center">@w.Year</td>
+                        <td class="text-center"><span class="badge bg-success">@w.DownloadCount</span></td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditWork(w)">✏️</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteWork(w)">🗑</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@* ================= ВКЛАДКА: ТИПЫ РАБОТ ================= *@
+@if (tab == "types")
+{
+    <div class="row g-3">
+        <div class="col-md-5">
+            <div class="card">
+                <div class="card-header fw-bold">@(editingType is null ? "➕ Новый тип" : "✏️ Редактирование")</div>
+                <div class="card-body">
+                    <label class="form-label">Название *</label>
+                    <input class="form-control mb-2" @bind="typeName" />
+                    <label class="form-label">Описание</label>
+                    <input class="form-control mb-3" @bind="typeDescription" />
+                    <button class="btn btn-success" @onclick="SaveType">💾 Сохранить</button>
+                    @if (editingType is not null)
+                    {
+                        <button class="btn btn-secondary ms-2" @onclick="ResetTypeForm">Отмена</button>
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-md-7">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:50px;">ID</th>
+                        <th>Название</th>
+                        <th>Описание</th>
+                        <th style="width:110px;">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in workTypes)
+                    {
+                        <tr @key="t.Id">
+                            <td>@t.Id</td>
+                            <td>@t.Name</td>
+                            <td><small class="text-muted">@t.Description</small></td>
+                            <td class="text-nowrap">
+                                <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditType(t)">✏️</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteType(t)">🗑</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@* ================= ВКЛАДКА: ВУЗЫ И СПЕЦИАЛЬНОСТИ ================= *@
+@if (tab == "inst")
+{
+    <div class="row g-3">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header fw-bold">🏛 Вузы</div>
+                <div class="card-body">
+                    <div class="input-group mb-3">
+                        <input class="form-control" @bind="instName" placeholder="Название вуза" />
+                        <input class="form-control" @bind="instCity" placeholder="Город" style="max-width:150px;" />
+                        <button class="btn btn-success" @onclick="SaveInstitution">💾</button>
+                    </div>
+                    @if (editingInst is not null)
+                    {
+                        <div class="alert alert-info py-1 small">
+                            Редактируется: <strong>@editingInst.Name</strong>
+                            <button class="btn btn-sm btn-link p-0 ms-2" @onclick="ResetInstForm">отмена</button>
+                        </div>
+                    }
+                    <table class="table table-sm table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th style="width:50px;">ID</th>
+                                <th>Название</th>
+                                <th>Город</th>
+                                <th style="width:110px;">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var i in institutions)
+                            {
+                                <tr @key="i.Id">
+                                    <td>@i.Id</td>
+                                    <td>@i.Name</td>
+                                    <td>@i.City</td>
+                                    <td class="text-nowrap">
+                                        <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditInst(i)">✏️</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteInst(i)">🗑</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header fw-bold">🎓 Специальности</div>
+                <div class="card-body">
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-5">
+                            <input class="form-control" @bind="specName" placeholder="Название" />
+                        </div>
+                        <div class="col-md-3">
+                            <input class="form-control" @bind="specCode" placeholder="Код" />
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" @bind="specInstitutionId">
+                                <option value="0">— ВУЗ —</option>
+                                @foreach (var i in institutions)
+                                {
+                                    <option value="@i.Id">@i.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-1">
+                            <button class="btn btn-success w-100" @onclick="SaveSpecialty">💾</button>
+                        </div>
+                    </div>
+                    @if (editingSpec is not null)
+                    {
+                        <div class="alert alert-info py-1 small">
+                            Редактируется: <strong>@editingSpec.Name</strong>
+                            <button class="btn btn-sm btn-link p-0 ms-2" @onclick="ResetSpecForm">отмена</button>
+                        </div>
+                    }
+                    <table class="table table-sm table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th style="width:50px;">ID</th>
+                                <th>Название</th>
+                                <th>Код</th>
+                                <th>Вуз</th>
+                                <th style="width:110px;">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in specialties)
+                            {
+                                <tr @key="s.Id">
+                                    <td>@s.Id</td>
+                                    <td>@s.Name</td>
+                                    <td>@s.Code</td>
+                                    <td><small>@s.Institution?.Name</small></td>
+                                    <td class="text-nowrap">
+                                        <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditSpec(s)">✏️</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSpec(s)">🗑</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string tab = "works";
+    private string? message;
+    private bool isError;
+
+    private List<StudentWork> allWorks = new();
+    private List<WorkType> workTypes = new();
+    private List<Institution> institutions = new();
+    private List<Specialty> specialties = new();
+
+    // Работы
+    private StudentWork? editingWork;
+
+    // Типы
+    private WorkType? editingType;
+    private string typeName = "";
+    private string typeDescription = "";
+
+    // Вузы
+    private Institution? editingInst;
+    private string instName = "";
+    private string instCity = "";
+
+    // Специальности
+    private Specialty? editingSpec;
+    private string specName = "";
+    private string specCode = "";
+    private int specInstitutionId;
+
+    protected override async Task OnInitializedAsync() => await LoadAll();
+
+    private async Task LoadAll()
+    {
+        await using var ctx = await DbContextFactory.CreateDbContextAsync();
+        workTypes = await ctx.WorkTypes.OrderBy(t => t.Name).ToListAsync();
+        institutions = await ctx.Institutions.OrderBy(i => i.Name).ToListAsync();
+        specialties = await ctx.Specialties.Include(s => s.Institution).OrderBy(s => s.Name).ToListAsync();
+        allWorks = await ctx.StudentWorks
+            .Include(w => w.WorkType)
+            .Include(w => w.Specialty).ThenInclude(s => s!.Institution)
+            .OrderByDescending(w => w.UploadDate)
+            .ToListAsync();
+    }
+
+    private void ShowOk(string msg) { message = msg; isError = false; }
+    private void ShowErr(string msg) { message = msg; isError = true; }
+
+    // ---------- Работы ----------
+    private void StartEditWork(StudentWork w)
+    {
+        // Копируем, чтобы «Отмена» не меняла список
+        editingWork = new StudentWork
+        {
+            Id = w.Id,
+            Title = w.Title,
+            Author = w.Author,
+            Year = w.Year,
+            Abstract = w.Abstract,
+            Keywords = w.Keywords,
+            WorkTypeId = w.WorkTypeId,
+            SpecialtyId = w.SpecialtyId,
+            FilePath = w.FilePath,
+            OriginalFileName = w.OriginalFileName,
+            FileSize = w.FileSize,
+            DownloadCount = w.DownloadCount,
+            UploadDate = w.UploadDate
+        };
+    }
+
+    private async Task SaveWork()
+    {
+        if (editingWork is null) return;
+        if (string.IsNullOrWhiteSpace(editingWork.Title) ||
+            editingWork.WorkTypeId is null || editingWork.SpecialtyId is null)
+        {
+            ShowErr("Заполните название, тип и специальность.");
+            return;
+        }
+
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            var entity = await ctx.StudentWorks.FindAsync(editingWork.Id);
+            if (entity is null) { ShowErr("Работа не найдена."); return; }
+
+            entity.Title = editingWork.Title.Trim();
+            entity.Author = editingWork.Author;
+            entity.Year = editingWork.Year;
+            entity.Abstract = editingWork.Abstract;
+            entity.Keywords = editingWork.Keywords;
+            entity.WorkTypeId = editingWork.WorkTypeId;
+            entity.SpecialtyId = editingWork.SpecialtyId;
+            entity.ModifiedDate = DateTime.UtcNow;
+
+            await ctx.SaveChangesAsync();
+            editingWork = null;
+            await LoadAll();
+            ShowOk("Работа обновлена.");
+        }
+        catch (Exception ex) { ShowErr($"Ошибка: {ex.Message}"); }
+    }
+
+    private async Task DeleteWork(StudentWork w)
+    {
+        if (!await Confirm($"Удалить работу «{w.Title}»? Файл на диске останется.")) return;
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            var entity = await ctx.StudentWorks.FindAsync(w.Id);
+            if (entity is not null) { ctx.StudentWorks.Remove(entity); await ctx.SaveChangesAsync(); }
+            await LoadAll();
+            ShowOk("Работа удалена.");
+        }
+        catch (Exception ex) { ShowErr($"Ошибка: {ex.Message}"); }
+    }
+
+    // ---------- Типы работ ----------
+    private void StartEditType(WorkType t)
+    {
+        editingType = t;
+        typeName = t.Name;
+        typeDescription = t.Description ?? "";
+    }
+
+    private void ResetTypeForm()
+    {
+        editingType = null;
+        typeName = "";
+        typeDescription = "";
+    }
+
+    private async Task SaveType()
+    {
+        if (string.IsNullOrWhiteSpace(typeName)) { ShowErr("Название типа не может быть пустым."); return; }
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            if (editingType is null)
+            {
+                ctx.WorkTypes.Add(new WorkType { Name = typeName.Trim(), Description = typeDescription });
+            }
+            else
+            {
+                var entity = await ctx.WorkTypes.FindAsync(editingType.Id);
+                if (entity is null) { ShowErr("Тип не найден."); return; }
+                entity.Name = typeName.Trim();
+                entity.Description = typeDescription;
+            }
+            await ctx.SaveChangesAsync();
+            ResetTypeForm();
+            await LoadAll();
+            ShowOk("Тип сохранён.");
+        }
+        catch (Exception ex) { ShowErr($"Ошибка (возможно, имя занято): {ex.Message}"); }
+    }
+
+    private async Task DeleteType(WorkType t)
+    {
+        if (!await Confirm($"Удалить тип «{t.Name}»?")) return;
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            if (await ctx.StudentWorks.AnyAsync(w => w.WorkTypeId == t.Id))
+            {
+                ShowErr("Нельзя удалить: к этому типу привязаны работы.");
+                return;
+            }
+            var entity = await ctx.WorkTypes.FindAsync(t.Id);
+            if (entity is not null) { ctx.WorkTypes.Remove(entity); await ctx.SaveChangesAsync(); }
+            await LoadAll();
+            ShowOk("Тип удалён.");
+        }
+        catch (Exception ex) { ShowErr($"Ошибка: {ex.Message}"); }
+    }
+
+    // ---------- Вузы ----------
+    private void StartEditInst(Institution i)
+    {
+        editingInst = i;
+        instName = i.Name;
+        instCity = i.City ?? "";
+    }
+
+    private void ResetInstForm()
+    {
+        editingInst = null;
+        instName = "";
+        instCity = "";
+    }
+
+    private async Task SaveInstitution()
+    {
+        if (string.IsNullOrWhiteSpace(instName)) { ShowErr("Название вуза не может быть пустым."); return; }
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            if (editingInst is null)
+            {
+                ctx.Institutions.Add(new Institution { Name = instName.Trim(), City = instCity });
+            }
+            else
+            {
+                var entity = await ctx.Institutions.FindAsync(editingInst.Id);
+                if (entity is null) { ShowErr("Вуз не найден."); return; }
+                entity.Name = instName.Trim();
+                entity.City = instCity;
+            }
+            await ctx.SaveChangesAsync();
+            ResetInstForm();
+            await LoadAll();
+            ShowOk("Вуз сохранён.");
+        }
+        catch (Exception ex) { ShowErr($"Ошибка (возможно, имя занято): {ex.Message}"); }
+    }
+
+    private async Task DeleteInst(Institution i)
+    {
+        if (!await Confirm($"Удалить вуз «{i.Name}»?")) return;
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            if (await ctx.Specialties.AnyAsync(s => s.InstitutionId == i.Id))
+            {
+                ShowErr("Нельзя удалить: у вуза есть специальности. Сначала удалите их.");
+                return;
+            }
+            var entity = await ctx.Institutions.FindAsync(i.Id);
+            if (entity is not null) { ctx.Institutions.Remove(entity); await ctx.SaveChangesAsync(); }
+            await LoadAll();
+            ShowOk("Вуз удалён.");
+        }
+        catch (Exception ex) { ShowErr($"Ошибка: {ex.Message}"); }
+    }
+
+    // ---------- Специальности ----------
+    private void StartEditSpec(Specialty s)
+    {
+        editingSpec = s;
+        specName = s.Name;
+        specCode = s.Code;
+        specInstitutionId = s.InstitutionId;
+    }
+
+    private void ResetSpecForm()
+    {
+        editingSpec = null;
+        specName = "";
+        specCode = "";
+        specInstitutionId = 0;
+    }
+
+    private async Task SaveSpecialty()
+    {
+        if (string.IsNullOrWhiteSpace(specName) || string.IsNullOrWhiteSpace(specCode) || specInstitutionId == 0)
+        {
+            ShowErr("Заполните название, код и выберите вуз.");
+            return;
+        }
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            if (editingSpec is null)
+            {
+                ctx.Specialties.Add(new Specialty
+                {
+                    Name = specName.Trim(),
+                    Code = specCode.Trim(),
+                    InstitutionId = specInstitutionId
+                });
+            }
+            else
+            {
+                var entity = await ctx.Specialties.FindAsync(editingSpec.Id);
+                if (entity is null) { ShowErr("Специальность не найдена."); return; }
+                entity.Name = specName.Trim();
+                entity.Code = specCode.Trim();
+                entity.InstitutionId = specInstitutionId;
+            }
+            await ctx.SaveChangesAsync();
+            ResetSpecForm();
+            await LoadAll();
+            ShowOk("Специальность сохранена.");
+        }
+        catch (Exception ex) { ShowErr($"Ошибка (возможно, дубликат кода в вузе): {ex.Message}"); }
+    }
+
+    private async Task DeleteSpec(Specialty s)
+    {
+        if (!await Confirm($"Удалить специальность «{s.Name}»?")) return;
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            if (await ctx.StudentWorks.AnyAsync(w => w.SpecialtyId == s.Id))
+            {
+                ShowErr("Нельзя удалить: к специальности привязаны работы.");
+                return;
+            }
+            var entity = await ctx.Specialties.FindAsync(s.Id);
+            if (entity is not null) { ctx.Specialties.Remove(entity); await ctx.SaveChangesAsync(); }
+            await LoadAll();
+            ShowOk("Специальность удалена.");
+        }
+        catch (Exception ex) { ShowErr($"Ошибка: {ex.Message}"); }
+    }
+
+    // Простое подтверждение через JS confirm
+    private async Task<bool> Confirm(string text)
+        => await JSRuntime.InvokeAsync<bool>("confirm", text);
+}

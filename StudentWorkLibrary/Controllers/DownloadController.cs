@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StudentWorkLibrary.Data;
+using System.IO;
 
 namespace StudentWorkLibrary.Controllers;
 
@@ -28,19 +29,22 @@ public class DownloadController : ControllerBase
             if (work == null)
                 return NotFound(new { message = "Работа не найдена", id });
 
-            work.DownloadCount++;
-            await context.SaveChangesAsync();
-
             var fullPath = Path.Combine(_env.WebRootPath,
                 work.FilePath.Replace('/', Path.DirectorySeparatorChar));
 
             if (!System.IO.File.Exists(fullPath))
                 return NotFound(new { message = "Файл не найден на сервере", path = fullPath });
 
-            var fileBytes = await System.IO.File.ReadAllBytesAsync(fullPath);
+            // Счётчик увеличиваем до отдачи файла — если стриминг упадёт на середине,
+            // пользователь всё равно «начал» скачивание.
+            work.DownloadCount++;
+            await context.SaveChangesAsync();
+
             var contentType = GetContentType(Path.GetExtension(work.FilePath));
 
-            return File(fileBytes, contentType, work.OriginalFileName);
+            // PhysicalFile отдаёт файл потоком с диска, не загружая его в память целиком.
+            // enableRangeProcessing: true — поддержка докачки (Range-запросы).
+            return PhysicalFile(fullPath, contentType, work.OriginalFileName, enableRangeProcessing: true);
         }
         catch (Exception ex)
         {
@@ -65,10 +69,11 @@ public class DownloadController : ControllerBase
             if (!System.IO.File.Exists(fullPath))
                 return NotFound(new { message = "Файл не найден на сервере", path = fullPath });
 
-            var fileBytes = await System.IO.File.ReadAllBytesAsync(fullPath);
             var contentType = GetContentType(Path.GetExtension(work.FilePath));
 
-            return File(fileBytes, contentType);
+            // Без fileDownloadName — браузер отобразит PDF inline (в iframe).
+            // Стриминг с диска, без буферизации в памяти.
+            return PhysicalFile(fullPath, contentType, enableRangeProcessing: true);
         }
         catch (Exception ex)
         {

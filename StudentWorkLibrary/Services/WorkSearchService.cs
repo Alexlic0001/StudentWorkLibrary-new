@@ -31,11 +31,15 @@ namespace StudentWorkLibrary.Services
 
             if (!string.IsNullOrWhiteSpace(query))
             {
+                // ToLower() с обеих сторон: EF Core транслирует в SQL lower(),
+                // который в SQLite корректно работает с кириллицей (в отличие от LIKE).
+                var q = query.Trim().ToLower();
+
                 works = works.Where(w =>
-                    (w.Title != null && w.Title.Contains(query)) ||
-                    (w.Author != null && w.Author.Contains(query)) ||
-                    (w.Keywords != null && w.Keywords.Contains(query)) ||
-                    (w.Abstract != null && w.Abstract.Contains(query)));
+                    (w.Title != null && w.Title.ToLower().Contains(q)) ||
+                    (w.Author != null && w.Author.ToLower().Contains(q)) ||
+                    (w.Keywords != null && w.Keywords.ToLower().Contains(q)) ||
+                    (w.Abstract != null && w.Abstract.ToLower().Contains(q)));
             }
 
             if (workTypeId.HasValue) works = works.Where(w => w.WorkTypeId == workTypeId.Value);

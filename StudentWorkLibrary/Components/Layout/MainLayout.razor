@@ -1,5 +1,5 @@
 ﻿@inherits LayoutComponentBase
-@using Microsoft.AspNetCore.Authorization
+@implements IDisposable
 @using Microsoft.AspNetCore.Components.Authorization
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthProvider
@@ -19,6 +19,9 @@
                 {
                     <li class="nav-item">
                         <a class="nav-link" href="/admin/upload">📤 Загрузить работу</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/manage">⚙️ Управление</a>
                     </li>
                 }
                 @if (isAuthenticated)
@@ -41,7 +44,7 @@
     </div>
 </nav>
 
-<main class="container mt-3">
+<main class="container-fluid mt-3 px-4">
     @Body
 </main>
 
@@ -75,24 +78,25 @@
     private bool isAdmin = false;
     private string userEmail = "";
 
+    private AuthenticationStateChangedHandler? _authStateChangedHandler;
+
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthProvider.GetAuthenticationStateAsync();
         var user = authState.User;
 
         isAuthenticated = user.Identity?.IsAuthenticated ?? false;
-
         if (isAuthenticated)
         {
             userEmail = user.Identity?.Name ?? "";
             isAdmin = user.IsInRole("Admin");
         }
 
-        AuthProvider.AuthenticationStateChanged += async _ =>
+        _authStateChangedHandler = async (task) =>
         {
             await InvokeAsync(async () =>
             {
-                var newState = await AuthProvider.GetAuthenticationStateAsync();
+                var newState = await task;
                 var newUser = newState.User;
                 isAuthenticated = newUser.Identity?.IsAuthenticated ?? false;
                 userEmail = newUser.Identity?.Name ?? "";
@@ -100,10 +104,21 @@
                 StateHasChanged();
             });
         };
+
+        AuthProvider.AuthenticationStateChanged += _authStateChangedHandler;
     }
 
     private void Logout()
     {
         Navigation.NavigateTo("/logout", true);
+    }
+
+    public void Dispose()
+    {
+        if (_authStateChangedHandler is not null)
+        {
+            AuthProvider.AuthenticationStateChanged -= _authStateChangedHandler;
+            _authStateChangedHandler = null;
+        }
     }
 }

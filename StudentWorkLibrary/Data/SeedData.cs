@@ -13,21 +13,29 @@ namespace StudentWorkLibrary.Data
 
             var userManager = serviceProvider.GetRequiredService<UserManager<IdentityUser>>();
             var roleManager = serviceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+            var logger = serviceProvider.GetRequiredService<ILoggerFactory>()
+                                         .CreateLogger(nameof(SeedData));
 
-            // Создаем базу данных, если её нет
+            // Применяем миграции (создаёт БД, если её нет)
             await context.Database.MigrateAsync();
 
-            // Создаем роли
+            // ---------- Роли ----------
             string[] roles = { "Admin", "User" };
             foreach (var role in roles)
             {
-                if (!await roleManager.RoleExistsAsync(role))
+                if (await roleManager.RoleExistsAsync(role))
+                    continue;
+
+                var result = await roleManager.CreateAsync(new IdentityRole(role));
+                if (!result.Succeeded)
                 {
-                    await roleManager.CreateAsync(new IdentityRole(role));
+                    var errors = string.Join("; ", result.Errors.Select(e => e.Description));
+                    throw new InvalidOperationException($"Не удалось создать роль «{role}»: {errors}");
                 }
+                logger.LogInformation("Роль «{Role}» создана.", role);
             }
 
-            // Создаем администратора
+            // ---------- Администратор ----------
             var adminEmail = "admin@library.com";
             var adminUser = await userManager.FindByEmailAsync(adminEmail);
             if (adminUser == null)
@@ -38,11 +46,29 @@ namespace StudentWorkLibrary.Data
                     Email = adminEmail,
                     EmailConfirmed = true
                 };
-                await userManager.CreateAsync(adminUser, "Admin123!");
-                await userManager.AddToRoleAsync(adminUser, "Admin");
+
+                var createResult = await userManager.CreateAsync(adminUser, "Admin123!");
+                if (!createResult.Succeeded)
+                {
+                    var errors = string.Join("; ", createResult.Errors.Select(e => e.Description));
+                    throw new InvalidOperationException($"Не удалось создать администратора: {errors}");
+                }
+                logger.LogInformation("Администратор {Email} создан.", adminEmail);
             }
 
-            // Добавляем типы работ, если их нет
+            // Роль Admin назначаем идемпотентно — даже если пользователь уже был
+            if (!await userManager.IsInRoleAsync(adminUser, "Admin"))
+            {
+                var roleResult = await userManager.AddToRoleAsync(adminUser, "Admin");
+                if (!roleResult.Succeeded)
+                {
+                    var errors = string.Join("; ", roleResult.Errors.Select(e => e.Description));
+                    throw new InvalidOperationException($"Не удалось назначить роль Admin пользователю {adminEmail}: {errors}");
+                }
+                logger.LogInformation("Пользователю {Email} назначена роль Admin.", adminEmail);
+            }
+
+            // ---------- Типы работ ----------
             if (!await context.WorkTypes.AnyAsync())
             {
                 context.WorkTypes.AddRange(
@@ -54,9 +80,10 @@ namespace StudentWorkLibrary.Data
                     new WorkType { Name = "Научная статья", Description = "Статья для публикации" }
                 );
                 await context.SaveChangesAsync();
+                logger.LogInformation("Добавлены типы работ.");
             }
 
-            // Добавляем пример ВУЗа
+            // ---------- Вузы ----------
             if (!await context.Institutions.AnyAsync())
             {
                 context.Institutions.AddRange(
@@ -64,9 +91,10 @@ namespace StudentWorkLibrary.Data
                     new Institution { Name = "Санкт-Петербургский Государственный Университет", City = "Санкт-Петербург" }
                 );
                 await context.SaveChangesAsync();
+                logger.LogInformation("Добавлены вузы.");
             }
 
-            // Добавляем пример специальности
+            // ---------- Специальности ----------
             if (!await context.Specialties.AnyAsync())
             {
                 var msu = await context.Institutions.FirstOrDefaultAsync(i => i.Name.Contains("Московский"));
@@ -77,6 +105,11 @@ namespace StudentWorkLibrary.Data
                         new Specialty { Name = "Прикладная математика", Code = "01.03.02", InstitutionId = msu.Id }
                     );
                     await context.SaveChangesAsync();
+                    logger.LogInformation("Добавлены специальности.");
+                }
+                else
+                {
+                    logger.LogWarning("Вуз «Московский...» не найден — специальности не добавлены.");
                 }
             }
         }

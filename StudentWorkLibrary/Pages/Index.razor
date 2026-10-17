@@ -1,7 +1,10 @@
 ﻿@page "/"
 @rendermode RenderMode.InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
 @using StudentWorkLibrary.Models
 @using StudentWorkLibrary.Data
 @using StudentWorkLibrary.Services
@@ -9,6 +12,8 @@
 @inject IWorkSearchService SearchService
 @inject NavigationManager Navigation
 @inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject AuthenticationStateProvider AuthProvider
+@inject IJSRuntime JSRuntime
 
 <h1>📚 Библиотека студенческих работ</h1>
 
@@ -24,88 +29,191 @@
     </div>
 </div>
 
-<div class="row">
-    <div class="col-md-3">
-        <div class="card mb-3">
-            <div class="card-header fw-bold">🗂 Фильтры</div>
-            <div class="card-body">
+@* ===== Фильтры (горизонтальная панель) ===== *@
+<div class="card mb-3">
+    <div class="card-header fw-bold">🗂 Фильтры</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
                 <label class="form-label">Тип работы</label>
-                <select class="form-select mb-3" @bind="selectedWorkTypeId">
+                <select class="form-select" @bind="selectedWorkTypeId">
                     <option value="">Все</option>
                     @foreach (var type in workTypes)
                     {
                         <option value="@type.Id">@type.Name</option>
                     }
                 </select>
-
+            </div>
+            <div class="col-md-3">
                 <label class="form-label">ВУЗ</label>
-                <select class="form-select mb-3" @bind="selectedInstitutionId">
+                <select class="form-select" @bind="selectedInstitutionId">
                     <option value="">Все</option>
                     @foreach (var inst in institutions)
                     {
                         <option value="@inst.Id">@inst.Name</option>
                     }
                 </select>
-
+            </div>
+            <div class="col-md-3">
                 <label class="form-label">Специальность</label>
-                <select class="form-select mb-3" @bind="selectedSpecialtyId">
+                <select class="form-select" @bind="selectedSpecialtyId">
                     <option value="">Все</option>
                     @foreach (var spec in specialties)
                     {
                         <option value="@spec.Id">@spec.Name (@spec.Code)</option>
                     }
                 </select>
-
+            </div>
+            <div class="col-md-2">
                 <label class="form-label">Год</label>
-                <input type="number" class="form-control mb-3" @bind="selectedYear" placeholder="Например: 2024" />
+                <input type="number" class="form-control" @bind="selectedYear" placeholder="2024" />
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button class="btn btn-outline-secondary w-100" @onclick="ClearFilters" title="Сброс">↺</button>
+            </div>
+        </div>
+        <div class="mt-2 text-muted small">
+            📊 Всего работ: @works.Count &nbsp;|&nbsp; Всего скачиваний: @works.Sum(w => w.DownloadCount)
+        </div>
+    </div>
+</div>
+
+@* ===== Таблица работ ===== *@
+@if (isLoading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <span class="ms-2">Загрузка...</span>
+    </div>
+}
+else if (!works.Any())
+{
+    <div class="alert alert-info">🔍 Работ не найдено. Попробуйте изменить фильтры.</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover table-striped align-middle w-100">
+            <thead class="table-dark">
+                <tr>
+                    <th style="cursor:pointer; width:50px;" @onclick="() => SortBy(0)">ID</th>
+                    <th style="cursor:pointer;" @onclick="() => SortBy(1)">Название работы</th>
+                    <th style="cursor:pointer; width:120px;" @onclick="() => SortBy(2)">Автор</th>
+                    <th style="cursor:pointer; width:130px;" @onclick="() => SortBy(3)">Тип</th>
+                    <th style="width:140px;">Специальность</th>
+                    <th style="width:140px;">ВУЗ</th>
+                    <th style="cursor:pointer; width:70px;" @onclick="() => SortBy(4)">Год</th>
+                    <th style="cursor:pointer; width:110px;" @onclick="() => SortBy(5)">Загружено</th>
+                    <th style="cursor:pointer; width:80px;" @onclick="() => SortBy(6)">⬇</th>
+                    <th style="width:80px;">Формат</th>
+                    <th style="width:@(isAdmin ? "180px" : "110px");">Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var work in SortedWorks)
+                {
+                    <tr @key="work.Id">
+                        <td>@work.Id</td>
+                        <td>
+                            <strong>@work.Title</strong>
+                            @if (!string.IsNullOrEmpty(work.Abstract))
+                            {
+                                <br />
+                                <small class="text-muted">@Truncate(work.Abstract, 80)</small>
+                            }
+                            @if (!string.IsNullOrEmpty(work.Keywords))
+                            {
+                                <br />
+                                <small class="text-info">🔑 @work.Keywords</small>
+                            }
+                        </td>
+                        <td>@(string.IsNullOrEmpty(work.Author) ? "—" : work.Author)</td>
+                        <td><span class="badge bg-primary">@work.WorkType?.Name</span></td>
+                        <td>@work.Specialty?.Name</td>
+                        <td>@work.Specialty?.Institution?.Name</td>
+                        <td class="text-center">@(work.Year?.ToString() ?? "—")</td>
+                        <td>@work.UploadDate.ToString("dd.MM.yyyy")</td>
+                        <td class="text-center">
+                            <span class="badge bg-success">@work.DownloadCount</span>
+                        </td>
+                        <td class="text-center">
+                            @{
+                                var ext = System.IO.Path.GetExtension(work.OriginalFileName)?.ToLower().TrimStart('.');
+                                var icon = ext switch
+                                {
+                                    "pdf" => "📄 PDF",
+                                    "doc" or "docx" => "📝 DOC",
+                                    "zip" or "rar" => "🗜️ ZIP",
+                                    _ => ext?.ToUpper() ?? "?"
+                                };
+                            }
+                            <span class="badge bg-secondary">@icon</span>
+                        </td>
+                        <td class="text-center text-nowrap">
+                            @if (System.IO.Path.GetExtension(work.OriginalFileName)?.ToLower() == ".pdf")
+                            {
+                                <button class="btn btn-sm btn-outline-success me-1"
+                                        title="Предпросмотр PDF"
+                                        @onclick="() => OpenPreview(work.Id, work.Title)">
+                                    👁️
+                                </button>
+                            }
+                            <button class="btn btn-sm btn-outline-primary"
+                                    title="Скачать файл"
+                                    @onclick="() => DownloadWork(work.Id)">
+                                ⬇️
+                            </button>
+
+                            @if (isAdmin)
+                            {
+                                <button class="btn btn-sm btn-outline-warning ms-1"
+                                        title="Редактировать"
+                                        @onclick="() => EditWork(work.Id)">
+                                    ✏️
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger ms-1"
+                                        title="Удалить"
+                                        @onclick="() => DeleteWork(work)">
+                                    🗑
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mt-3 d-flex justify-content-between text-muted">
+        <small>Показано работ: @SortedWorks.Count из @works.Count</small>
+        <small>Всего скачиваний: @works.Sum(w => w.DownloadCount)</small>
+    </div>
+}
+
+@* ===== Модальное окно предпросмотра PDF ===== *@
+@if (showPreview)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);" @onclick="ClosePreview">
+        <div class="modal-dialog modal-xl modal-dialog-centered" @onclick:stopPropagation>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-truncate">📄 @previewTitle</h5>
+                    <button type="button" class="btn-close" @onclick="ClosePreview"></button>
+                </div>
+                <div class="modal-body p-0" style="height: 80vh;">
+                    <iframe src="@previewUrl" style="border: none; width: 100%; height: 100%;"></iframe>
+                </div>
+                <div class="modal-footer">
+                    <a class="btn btn-primary" href="@previewDownloadUrl" target="_blank">
+                        ⬇️ Скачать
+                    </a>
+                    <button class="btn btn-secondary" @onclick="ClosePreview">Закрыть</button>
+                </div>
             </div>
         </div>
     </div>
-
-    <div class="col-md-9">
-        @if (isLoading)
-        {
-            <div class="text-center py-5">
-                <div class="spinner-border text-primary" role="status"></div>
-                <span class="ms-2">Загрузка...</span>
-            </div>
-        }
-        else if (!works.Any())
-        {
-            <div class="alert alert-info">🔍 Работ не найдено. Попробуйте изменить фильтры.</div>
-        }
-        else
-        {
-            @foreach (var work in works)
-            {
-                <div class="card mb-3" @key="work.Id">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <h5 class="card-title mb-1">@work.Title</h5>
-                            <span class="badge bg-success fs-6">⬇ @work.DownloadCount</span>
-                        </div>
-                        <div class="mb-2 mt-2">
-                            <span class="badge bg-primary">@work.WorkType?.Name</span>
-                            <span class="badge bg-secondary">@work.Specialty?.Name</span>
-                            <span class="badge bg-info text-dark">@work.Year</span>
-                            <span class="badge bg-warning text-dark">@work.Specialty?.Institution?.Name</span>
-                        </div>
-                        <p class="card-text mb-2">
-                            <strong>Автор:</strong> @(string.IsNullOrEmpty(work.Author) ? "Не указан" : work.Author)<br />
-                            @if (!string.IsNullOrEmpty(work.Abstract))
-                            {
-                                <small class="text-muted d-block mt-1">@work.Abstract[..Math.Min(150, work.Abstract.Length)]...</small>
-                            }
-                        </p>
-                        <button class="btn btn-sm btn-outline-primary mt-2" @onclick="() => DownloadWork(work.Id)">
-                            📥 Скачать файл
-                        </button>
-                    </div>
-                </div>
-            }
-        }
-    </div>
-</div>
+    <div class="modal-backdrop fade show"></div>
+}
 
 @code {
     private string searchQuery = "";
@@ -115,11 +223,46 @@
     private List<Institution> institutions = new();
     private List<Specialty> specialties = new();
     private bool isLoading = false;
+    private bool isAdmin = false;
+
+    private int sortColumn = 0;
+    private bool sortAscending = false;
+
+    private bool showPreview = false;
+    private string previewUrl = "";
+    private string previewDownloadUrl = "";
+    private string previewTitle = "";
+
+    private List<StudentWork> SortedWorks
+    {
+        get
+        {
+            var result = works.ToList();
+            switch (sortColumn)
+            {
+                case 0: result = sortAscending ? result.OrderBy(w => w.Id).ToList() : result.OrderByDescending(w => w.Id).ToList(); break;
+                case 1: result = sortAscending ? result.OrderBy(w => w.Title).ToList() : result.OrderByDescending(w => w.Title).ToList(); break;
+                case 2: result = sortAscending ? result.OrderBy(w => w.Author).ToList() : result.OrderByDescending(w => w.Author).ToList(); break;
+                case 3: result = sortAscending ? result.OrderBy(w => w.WorkType?.Name).ToList() : result.OrderByDescending(w => w.WorkType?.Name).ToList(); break;
+                case 4: result = sortAscending ? result.OrderBy(w => w.Year).ToList() : result.OrderByDescending(w => w.Year).ToList(); break;
+                case 5: result = sortAscending ? result.OrderBy(w => w.UploadDate).ToList() : result.OrderByDescending(w => w.UploadDate).ToList(); break;
+                case 6: result = sortAscending ? result.OrderBy(w => w.DownloadCount).ToList() : result.OrderByDescending(w => w.DownloadCount).ToList(); break;
+            }
+            return result;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadAuthStateAsync();
         await LoadFilters();
         await Search();
+    }
+
+    private async Task LoadAuthStateAsync()
+    {
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        isAdmin = authState.User.IsInRole("Admin");
     }
 
     private async Task LoadFilters()
@@ -136,7 +279,7 @@
         try
         {
             works = await SearchService.SearchAsync(
-                searchQuery?.Trim(),
+                searchQuery.Trim(),
                 selectedWorkTypeId,
                 selectedInstitutionId,
                 selectedSpecialtyId,
@@ -154,11 +297,65 @@
 
     private void HandleSearchEnter(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter") Search();
+        if (e.Key == "Enter") _ = Search();
+    }
+
+    private void SortBy(int column)
+    {
+        if (sortColumn == column) sortAscending = !sortAscending;
+        else { sortColumn = column; sortAscending = true; }
     }
 
     private void DownloadWork(int workId)
+        => Navigation.NavigateTo($"/api/download/{workId}", true);
+
+    private void EditWork(int workId)
     {
-        Navigation.NavigateTo($"/api/download/{workId}", true);
+        // Открываем админ-панель — редактирование работы там
+        Navigation.NavigateTo("/admin/manage");
     }
+
+    private async Task DeleteWork(StudentWork work)
+    {
+        if (!await JSRuntime.InvokeAsync<bool>("confirm",
+                $"Удалить работу «{work.Title}»? Файл на диске останется."))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            var entity = await ctx.StudentWorks.FindAsync(work.Id);
+            if (entity is not null)
+            {
+                ctx.StudentWorks.Remove(entity);
+                await ctx.SaveChangesAsync();
+            }
+            await Search();
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"Ошибка удаления: {ex.Message}");
+        }
+    }
+
+    private void OpenPreview(int workId, string title)
+    {
+        previewTitle = title;
+        previewUrl = $"/api/download/preview/{workId}";
+        previewDownloadUrl = $"/api/download/{workId}";
+        showPreview = true;
+    }
+
+    private void ClosePreview()
+    {
+        showPreview = false;
+        previewUrl = "";
+        previewDownloadUrl = "";
+        previewTitle = "";
+    }
+
+    private static string Truncate(string value, int max)
+        => string.IsNullOrEmpty(value) || value.Length <= max ? value : value[..max] + "…";
 }
