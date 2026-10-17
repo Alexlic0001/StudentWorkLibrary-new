@@ -8,14 +8,14 @@ namespace StudentWorkLibrary.Data
     {
         public static async Task InitializeAsync(IServiceProvider serviceProvider)
         {
-            using var context = new ApplicationDbContext(
-                serviceProvider.GetRequiredService<DbContextOptions<ApplicationDbContext>>());
+            var factory = serviceProvider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+            await using var context = await factory.CreateDbContextAsync();
 
             var userManager = serviceProvider.GetRequiredService<UserManager<IdentityUser>>();
             var roleManager = serviceProvider.GetRequiredService<RoleManager<IdentityRole>>();
 
             // Создаем базу данных, если её нет
-            await context.Database.EnsureCreatedAsync();
+            await context.Database.MigrateAsync();
 
             // Создаем роли
             string[] roles = { "Admin", "User" };
@@ -43,7 +43,7 @@ namespace StudentWorkLibrary.Data
             }
 
             // Добавляем типы работ, если их нет
-            if (!context.WorkTypes.Any())
+            if (!await context.WorkTypes.AnyAsync())
             {
                 context.WorkTypes.AddRange(
                     new WorkType { Name = "Курсовая работа", Description = "Курсовой проект/работа" },
@@ -57,7 +57,7 @@ namespace StudentWorkLibrary.Data
             }
 
             // Добавляем пример ВУЗа
-            if (!context.Institutions.Any())
+            if (!await context.Institutions.AnyAsync())
             {
                 context.Institutions.AddRange(
                     new Institution { Name = "Московский Государственный Университет", City = "Москва" },
@@ -67,7 +67,7 @@ namespace StudentWorkLibrary.Data
             }
 
             // Добавляем пример специальности
-            if (!context.Specialties.Any())
+            if (!await context.Specialties.AnyAsync())
             {
                 var msu = await context.Institutions.FirstOrDefaultAsync(i => i.Name.Contains("Московский"));
                 if (msu != null)

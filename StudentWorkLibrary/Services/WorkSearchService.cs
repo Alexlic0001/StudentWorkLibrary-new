@@ -14,12 +14,16 @@ namespace StudentWorkLibrary.Services
 
     public class WorkSearchService : IWorkSearchService
     {
-        private readonly ApplicationDbContext _context;
-        public WorkSearchService(ApplicationDbContext context) => _context = context;
+        private readonly IDbContextFactory<ApplicationDbContext> _factory;
+
+        public WorkSearchService(IDbContextFactory<ApplicationDbContext> factory)
+            => _factory = factory;
 
         public async Task<List<StudentWork>> SearchAsync(string query, int? workTypeId = null, int? institutionId = null, int? specialtyId = null, int? year = null)
         {
-            var works = _context.StudentWorks
+            await using var context = await _factory.CreateDbContextAsync();
+
+            var works = context.StudentWorks
                 .Include(w => w.WorkType)
                 .Include(w => w.Specialty)
                     .ThenInclude(s => s!.Institution)
@@ -47,7 +51,8 @@ namespace StudentWorkLibrary.Services
 
         public async Task<List<StudentWork>> GetRecentWorksAsync(int count = 10)
         {
-            return await _context.StudentWorks
+            await using var context = await _factory.CreateDbContextAsync();
+            return await context.StudentWorks
                 .Include(w => w.WorkType)
                 .Include(w => w.Specialty).ThenInclude(s => s!.Institution)
                 .OrderByDescending(w => w.UploadDate)
@@ -57,12 +62,13 @@ namespace StudentWorkLibrary.Services
 
         public async Task<Dictionary<string, int>> GetStatisticsAsync()
         {
+            await using var context = await _factory.CreateDbContextAsync();
             return new Dictionary<string, int>
             {
-                ["TotalWorks"] = await _context.StudentWorks.CountAsync(),
-                ["TotalInstitutions"] = await _context.Institutions.CountAsync(),
-                ["TotalSpecialties"] = await _context.Specialties.CountAsync(),
-                ["TotalDownloads"] = await _context.StudentWorks.SumAsync(w => w.DownloadCount)
+                ["TotalWorks"] = await context.StudentWorks.CountAsync(),
+                ["TotalInstitutions"] = await context.Institutions.CountAsync(),
+                ["TotalSpecialties"] = await context.Specialties.CountAsync(),
+                ["TotalDownloads"] = await context.StudentWorks.SumAsync(w => w.DownloadCount)
             };
         }
     }

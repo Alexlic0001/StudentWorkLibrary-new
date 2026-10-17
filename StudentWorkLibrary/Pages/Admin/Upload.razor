@@ -7,7 +7,7 @@
 @using StudentWorkLibrary.Models
 @using StudentWorkLibrary.Services
 @using Microsoft.EntityFrameworkCore
-@inject ApplicationDbContext DbContext
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
 @inject IFileService FileService
 @inject NavigationManager Navigation
 @attribute [Authorize(Roles = "Admin")]
@@ -107,8 +107,9 @@
 
     protected override async Task OnInitializedAsync()
     {
-        workTypes = await DbContext.WorkTypes.ToListAsync();
-        specialties = await DbContext.Specialties.Include(s => s.Institution).ToListAsync();
+        await using var ctx = await DbContextFactory.CreateDbContextAsync();
+        workTypes = await ctx.WorkTypes.ToListAsync();
+        specialties = await ctx.Specialties.Include(s => s.Institution).ToListAsync();
     }
 
     private void OnFileSelected(InputFileChangeEventArgs e)
@@ -143,7 +144,6 @@
 
             var filePath = await FileService.SaveFileAsync(selectedFile, workTypeName, institutionName, year);
 
-            // Разыменовываем nullable FK
             var entity = new StudentWork
             {
                 Title = newWork.Title,
@@ -160,8 +160,9 @@
                 SpecialtyId = newWork.SpecialtyId!.Value
             };
 
-            DbContext.StudentWorks.Add(entity);
-            await DbContext.SaveChangesAsync();
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            ctx.StudentWorks.Add(entity);
+            await ctx.SaveChangesAsync();
 
             Navigation.NavigateTo("/", true);
         }
