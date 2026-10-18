@@ -21,16 +21,35 @@ namespace StudentWorkLibrary.Services
 
         public async Task<string?> ConvertToPdfAsync(string inputPath)
         {
+            // PDF кладём рядом с исходным файлом: то же имя, но расширение .pdf
+            var pdfPath = Path.ChangeExtension(inputPath, ".pdf");
+
+            // Если PDF уже сконвертирован — возвращаем сразу, без запуска LibreOffice
+            if (File.Exists(pdfPath))
+            {
+                // Проверяем, что PDF новее исходного файла (не устарел)
+                var inputTime = File.GetLastWriteTimeUtc(inputPath);
+                var pdfTime = File.GetLastWriteTimeUtc(pdfPath);
+                if (pdfTime >= inputTime)
+                {
+                    _logger.LogInformation("PDF уже существует, кэш: {Path}", pdfPath);
+                    return pdfPath;
+                }
+
+                // PDF старее исходника — удаляем и конвертируем заново
+                _logger.LogInformation("PDF устарел, переконвертация: {Path}", pdfPath);
+                try { File.Delete(pdfPath); } catch { }
+            }
+
+            // Временная папка для вывода LibreOffice (он не умеет писать сразу в целевую папку с нужным именем)
             var tempDir = Path.Combine(_env.WebRootPath, "temp-preview");
             Directory.CreateDirectory(tempDir);
 
-            var outputName = $"{Guid.NewGuid():N}.pdf";
-            var outputPath = Path.Combine(tempDir, outputName);
-
             var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-            var soffice = isWindows ? "soffice.exe" : "soffice";
+            var soffice = isWindows
+                ? @"C:\Program Files\LibreOffice\program\soffice.exe"
+                : "soffice";
 
-            // Уникальный профиль для каждого вызова — предотвращает блокировки при параллельных конвертациях
             var userProfile = Path.Combine(Path.GetTempPath(), "lo-profile-" + Guid.NewGuid().ToString("N"));
             var args = $"--headless --invisible --norestore " +
                        $"-env:UserInstallation=file:///{userProfile.Replace('\\', '/')} " +
@@ -48,6 +67,8 @@ namespace StudentWorkLibrary.Services
 
             try
             {
+                _logger.LogInformation("Запуск LibreOffice: {File}", soffice);
+
                 using var process = Process.Start(psi);
                 if (process == null) return null;
 
@@ -59,18 +80,20 @@ namespace StudentWorkLibrary.Services
                     return null;
                 }
 
-                // LibreOffice сохраняет PDF с тем же именем, что и входной файл
-                var expectedPdf = Path.Combine(tempDir,
+                // LibreOffice сохраняет PDF в tempDir с именем исходного файла
+                var tempPdf = Path.Combine(tempDir,
                     Path.GetFileNameWithoutExtension(inputPath) + ".pdf");
 
-                if (!File.Exists(expectedPdf))
+                if (!File.Exists(tempPdf))
                 {
                     _logger.LogWarning("PDF not created for {Path}", inputPath);
                     return null;
                 }
 
-                File.Move(expectedPdf, outputPath, overwrite: true);
-                return outputPath;
+                // Перемещаем PDF рядом с исходным файлом
+                File.Move(tempPdf, pdfPath, overwrite: true);
+                _logger.LogInformation("PDF сохранён: {Path}", pdfPath);
+                return pdfPath;
             }
             catch (Exception ex)
             {

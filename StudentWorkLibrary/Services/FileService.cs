@@ -13,7 +13,8 @@ namespace StudentWorkLibrary.Services
     {
         private readonly IWebHostEnvironment _environment;
         private readonly ILogger<FileService> _logger;
-        private static readonly string[] AllowedExtensions = { ".pdf", ".doc", ".docx", ".zip", ".rar" };
+        private static readonly string[] AllowedExtensions =
+         { ".pdf", ".doc", ".docx", ".zip", ".rar", ".ppt", ".pptx" };
         private const long MaxFileSize = 104857600; // 100 MB
 
         public FileService(IWebHostEnvironment environment, ILogger<FileService> logger)

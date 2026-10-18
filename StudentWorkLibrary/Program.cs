@@ -38,6 +38,8 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IWorkSearchService, WorkSearchService>();
 
+builder.Services.AddScoped<IDocumentConverter, DocumentConverter>();
+
 // Razor Pages (Login/Logout) + Controllers (Download)
 builder.Services.AddRazorPages();
 builder.Services.AddControllers();

@@ -143,6 +143,7 @@ else
                                 {
                                     "pdf" => "📄 PDF",
                                     "doc" or "docx" => "📝 DOC",
+                                    "ppt" or "pptx" => "📊 PPT",
                                     "zip" or "rar" => "🗜️ ZIP",
                                     _ => ext?.ToUpper() ?? "?"
                                 };
@@ -150,10 +151,10 @@ else
                             <span class="badge bg-secondary">@icon</span>
                         </td>
                         <td class="text-center text-nowrap">
-                            @if (System.IO.Path.GetExtension(work.OriginalFileName)?.ToLower() == ".pdf")
+                            @if (System.IO.Path.GetExtension(work.OriginalFileName)?.ToLower() is ".pdf" or ".doc" or ".docx" or ".ppt" or ".pptx")
                             {
                                 <button class="btn btn-sm btn-outline-success me-1"
-                                        title="Предпросмотр PDF"
+                                        title="Предпросмотр"
                                         @onclick="() => OpenPreview(work.Id, work.Title)">
                                     👁️
                                 </button>

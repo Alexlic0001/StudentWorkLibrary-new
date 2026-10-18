@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StudentWorkLibrary.Data;
+using StudentWorkLibrary.Services;
 using System.IO;
 
 namespace StudentWorkLibrary.Controllers;
@@ -11,11 +12,16 @@ public class DownloadController : ControllerBase
 {
     private readonly IDbContextFactory<ApplicationDbContext> _factory;
     private readonly IWebHostEnvironment _env;
+    private readonly IDocumentConverter _converter;
 
-    public DownloadController(IDbContextFactory<ApplicationDbContext> factory, IWebHostEnvironment env)
+    public DownloadController(
+        IDbContextFactory<ApplicationDbContext> factory,
+        IWebHostEnvironment env,
+        IDocumentConverter converter)
     {
         _factory = factory;
         _env = env;
+        _converter = converter;
     }
 
     [HttpGet("{id:int}")]
@@ -69,11 +75,24 @@ public class DownloadController : ControllerBase
             if (!System.IO.File.Exists(fullPath))
                 return NotFound(new { message = "Файл не найден на сервере", path = fullPath });
 
-            var contentType = GetContentType(Path.GetExtension(work.FilePath));
+            var ext = Path.GetExtension(work.FilePath).ToLowerInvariant();
 
-            // Без fileDownloadName — браузер отобразит PDF inline (в iframe).
-            // Стриминг с диска, без буферизации в памяти.
-            return PhysicalFile(fullPath, contentType, enableRangeProcessing: true);
+            // PDF — отдаём как есть, браузер отобразит inline
+            if (ext == ".pdf")
+                return PhysicalFile(fullPath, "application/pdf", enableRangeProcessing: true);
+
+            // Office-форматы — конвертируем в PDF через LibreOffice
+            if (ext is ".doc" or ".docx" or ".ppt" or ".pptx")
+            {
+                var pdfPath = await _converter.ConvertToPdfAsync(fullPath);
+                if (pdfPath == null)
+                    return StatusCode(500, new { message = "Не удалось конвертировать файл для предпросмотра" });
+
+                return PhysicalFile(pdfPath, "application/pdf", enableRangeProcessing: true);
+            }
+
+            // Остальные форматы (zip, rar, изображения) — предпросмотр не поддерживается
+            return BadRequest(new { message = "Предпросмотр для этого формата не поддерживается", extension = ext });
         }
         catch (Exception ex)
         {
@@ -91,6 +110,8 @@ public class DownloadController : ControllerBase
             ".pdf" => "application/pdf",
             ".doc" => "application/msword",
             ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".ppt" => "application/vnd.ms-powerpoint",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             ".zip" => "application/zip",
             ".rar" => "application/x-rar-compressed",
             ".jpg" or ".jpeg" => "image/jpeg",
