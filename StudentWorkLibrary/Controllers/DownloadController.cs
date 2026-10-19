@@ -13,17 +13,26 @@ public class DownloadController : ControllerBase
     private readonly IDbContextFactory<ApplicationDbContext> _factory;
     private readonly IWebHostEnvironment _env;
     private readonly IDocumentConverter _converter;
+    private readonly IPdfTrimmer _pdfTrimmer;
+    private readonly int _maxPreviewPages;
 
     public DownloadController(
         IDbContextFactory<ApplicationDbContext> factory,
         IWebHostEnvironment env,
-        IDocumentConverter converter)
+        IDocumentConverter converter,
+        IPdfTrimmer pdfTrimmer,
+        IConfiguration config)
     {
         _factory = factory;
         _env = env;
         _converter = converter;
+        _pdfTrimmer = pdfTrimmer;
+        _maxPreviewPages = config.GetValue<int>("PdfPreview:MaxPages", 5);
     }
 
+    /// <summary>
+    /// Скачивание оригинала: .docx, .pdf, .pptx — что было загружено. Без обрезки.
+    /// </summary>
     [HttpGet("{id:int}")]
     public async Task<IActionResult> DownloadFile(int id)
     {
@@ -41,15 +50,11 @@ public class DownloadController : ControllerBase
             if (!System.IO.File.Exists(fullPath))
                 return NotFound(new { message = "Файл не найден на сервере", path = fullPath });
 
-            // Счётчик увеличиваем до отдачи файла — если стриминг упадёт на середине,
-            // пользователь всё равно «начал» скачивание.
             work.DownloadCount++;
             await context.SaveChangesAsync();
 
             var contentType = GetContentType(Path.GetExtension(work.FilePath));
 
-            // PhysicalFile отдаёт файл потоком с диска, не загружая его в память целиком.
-            // enableRangeProcessing: true — поддержка докачки (Range-запросы).
             return PhysicalFile(fullPath, contentType, work.OriginalFileName, enableRangeProcessing: true);
         }
         catch (Exception ex)
@@ -58,6 +63,83 @@ public class DownloadController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Скачивание обрезанного PDF (первые _maxPreviewPages страниц).
+    /// Оригинал не изменяется.
+    /// </summary>
+    [HttpGet("trimmed/{id:int}")]
+    public async Task<IActionResult> DownloadTrimmedPdf(int id)
+    {
+        try
+        {
+            await using var context = await _factory.CreateDbContextAsync();
+            var work = await context.StudentWorks.FirstOrDefaultAsync(w => w.Id == id);
+
+            if (work == null)
+                return NotFound(new { message = "Работа не найдена", id });
+
+            var fullPath = Path.Combine(_env.WebRootPath,
+                work.FilePath.Replace('/', Path.DirectorySeparatorChar));
+
+            if (!System.IO.File.Exists(fullPath))
+                return NotFound(new { message = "Файл не найден на сервере", path = fullPath });
+
+            work.DownloadCount++;
+            await context.SaveChangesAsync();
+
+            var ext = Path.GetExtension(work.FilePath).ToLowerInvariant();
+
+            string? fullPdfPath;
+            if (ext == ".pdf")
+            {
+                fullPdfPath = fullPath;
+            }
+            else if (ext is ".doc" or ".docx" or ".ppt" or ".pptx")
+            {
+                fullPdfPath = await _converter.ConvertToPdfAsync(fullPath);
+                if (fullPdfPath == null || !System.IO.File.Exists(fullPdfPath))
+                    return StatusCode(500, new { message = "Не удалось конвертировать файл в PDF" });
+            }
+            else
+            {
+                return BadRequest(new { message = "Обрезка PDF поддерживается только для PDF, DOC, DOCX, PPT, PPTX", extension = ext });
+            }
+
+            var previewDir = Path.Combine(_env.WebRootPath, "preview-cache");
+            Directory.CreateDirectory(previewDir);
+
+            var cacheKey = $"{work.Id}_{_maxPreviewPages}_{Path.GetFileNameWithoutExtension(fullPdfPath)}.pdf";
+            var trimmedPdfPath = Path.Combine(previewDir, cacheKey);
+
+            if (System.IO.File.Exists(trimmedPdfPath))
+            {
+                var fullTime = System.IO.File.GetLastWriteTimeUtc(fullPdfPath);
+                var trimmedTime = System.IO.File.GetLastWriteTimeUtc(trimmedPdfPath);
+                if (trimmedTime >= fullTime)
+                {
+                    var downloadName = $"{Path.GetFileNameWithoutExtension(work.OriginalFileName)}_first{_maxPreviewPages}.pdf";
+                    return PhysicalFile(trimmedPdfPath, "application/pdf", downloadName, enableRangeProcessing: true);
+                }
+                try { System.IO.File.Delete(trimmedPdfPath); } catch { }
+            }
+
+            var trimmed = await _pdfTrimmer.TrimToFirstPagesCopyAsync(fullPdfPath, trimmedPdfPath, _maxPreviewPages);
+            if (trimmed == null)
+                return StatusCode(500, new { message = "Не удалось подготовить PDF" });
+
+            var downloadFileName = $"{Path.GetFileNameWithoutExtension(work.OriginalFileName)}_first{_maxPreviewPages}.pdf";
+            return PhysicalFile(trimmed, "application/pdf", downloadFileName, enableRangeProcessing: true);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "Ошибка при скачивании обрезанного PDF", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Предпросмотр: ПОЛНЫЙ PDF (без обрезки), inline в iframe.
+    /// Для Office-форматов — конвертирует в полный PDF.
+    /// </summary>
     [HttpGet("preview/{id:int}")]
     public async Task<IActionResult> PreviewFile(int id)
     {
@@ -77,21 +159,20 @@ public class DownloadController : ControllerBase
 
             var ext = Path.GetExtension(work.FilePath).ToLowerInvariant();
 
-            // PDF — отдаём как есть, браузер отобразит inline
+            // PDF — отдаём как есть (полный)
             if (ext == ".pdf")
                 return PhysicalFile(fullPath, "application/pdf", enableRangeProcessing: true);
 
-            // Office-форматы — конвертируем в PDF через LibreOffice
+            // Office-форматы — конвертируем в ПОЛНЫЙ PDF (без обрезки)
             if (ext is ".doc" or ".docx" or ".ppt" or ".pptx")
             {
                 var pdfPath = await _converter.ConvertToPdfAsync(fullPath);
-                if (pdfPath == null)
+                if (pdfPath == null || !System.IO.File.Exists(pdfPath))
                     return StatusCode(500, new { message = "Не удалось конвертировать файл для предпросмотра" });
 
                 return PhysicalFile(pdfPath, "application/pdf", enableRangeProcessing: true);
             }
 
-            // Остальные форматы (zip, rar, изображения) — предпросмотр не поддерживается
             return BadRequest(new { message = "Предпросмотр для этого формата не поддерживается", extension = ext });
         }
         catch (Exception ex)

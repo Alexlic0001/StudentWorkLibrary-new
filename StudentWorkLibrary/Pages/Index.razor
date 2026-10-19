@@ -154,13 +154,18 @@ else
                             @if (System.IO.Path.GetExtension(work.OriginalFileName)?.ToLower() is ".pdf" or ".doc" or ".docx" or ".ppt" or ".pptx")
                             {
                                 <button class="btn btn-sm btn-outline-success me-1"
-                                        title="Предпросмотр"
+                                        title="Предпросмотр (полный документ)"
                                         @onclick="() => OpenPreview(work.Id, work.Title)">
                                     👁️
                                 </button>
+                                <button class="btn btn-sm btn-outline-primary me-1"
+                                        title="Скачать PDF (первые @MaxPages стр.)"
+                                        @onclick="() => DownloadTrimmed(work.Id)">
+                                    📄
+                                </button>
                             }
-                            <button class="btn btn-sm btn-outline-primary"
-                                    title="Скачать файл"
+                            <button class="btn btn-sm btn-outline-secondary me-1"
+                                    title="Скачать оригинал"
                                     @onclick="() => DownloadWork(work.Id)">
                                 ⬇️
                             </button>
@@ -233,6 +238,10 @@ else
     private string previewUrl = "";
     private string previewDownloadUrl = "";
     private string previewTitle = "";
+    private int MaxPages = 5;
+
+    private void DownloadTrimmed(int workId)
+        => Navigation.NavigateTo($"/api/download/trimmed/{workId}", true);
 
     private List<StudentWork> SortedWorks
     {

@@ -5,6 +5,10 @@ namespace StudentWorkLibrary.Services
 {
     public interface IDocumentConverter
     {
+        /// <summary>
+        /// Конвертирует Office-файл в PDF (полный, без обрезки) и кладёт рядом с исходником.
+        /// Возвращает путь к полному PDF.
+        /// </summary>
         Task<string?> ConvertToPdfAsync(string inputPath);
     }
 
@@ -21,13 +25,12 @@ namespace StudentWorkLibrary.Services
 
         public async Task<string?> ConvertToPdfAsync(string inputPath)
         {
-            // PDF кладём рядом с исходным файлом: то же имя, но расширение .pdf
+            // Полный PDF кладём рядом с исходником (кэш конвертации)
             var pdfPath = Path.ChangeExtension(inputPath, ".pdf");
 
-            // Если PDF уже сконвертирован — возвращаем сразу, без запуска LibreOffice
+            // Кэш: PDF уже есть и новее исходника — возвращаем
             if (File.Exists(pdfPath))
             {
-                // Проверяем, что PDF новее исходного файла (не устарел)
                 var inputTime = File.GetLastWriteTimeUtc(inputPath);
                 var pdfTime = File.GetLastWriteTimeUtc(pdfPath);
                 if (pdfTime >= inputTime)
@@ -36,12 +39,10 @@ namespace StudentWorkLibrary.Services
                     return pdfPath;
                 }
 
-                // PDF старее исходника — удаляем и конвертируем заново
                 _logger.LogInformation("PDF устарел, переконвертация: {Path}", pdfPath);
                 try { File.Delete(pdfPath); } catch { }
             }
 
-            // Временная папка для вывода LibreOffice (он не умеет писать сразу в целевую папку с нужным именем)
             var tempDir = Path.Combine(_env.WebRootPath, "temp-preview");
             Directory.CreateDirectory(tempDir);
 
@@ -67,7 +68,7 @@ namespace StudentWorkLibrary.Services
 
             try
             {
-                _logger.LogInformation("Запуск LibreOffice: {File}", soffice);
+                _logger.LogInformation("Запуск LibreOffice для {Path}", inputPath);
 
                 using var process = Process.Start(psi);
                 if (process == null) return null;
@@ -76,28 +77,26 @@ namespace StudentWorkLibrary.Services
                 if (!completed)
                 {
                     process.Kill();
-                    _logger.LogWarning("LibreOffice timeout for {Path}", inputPath);
+                    _logger.LogWarning("LibreOffice timeout для {Path}", inputPath);
                     return null;
                 }
 
-                // LibreOffice сохраняет PDF в tempDir с именем исходного файла
                 var tempPdf = Path.Combine(tempDir,
                     Path.GetFileNameWithoutExtension(inputPath) + ".pdf");
 
                 if (!File.Exists(tempPdf))
                 {
-                    _logger.LogWarning("PDF not created for {Path}", inputPath);
+                    _logger.LogWarning("PDF не создан для {Path}", inputPath);
                     return null;
                 }
 
-                // Перемещаем PDF рядом с исходным файлом
                 File.Move(tempPdf, pdfPath, overwrite: true);
                 _logger.LogInformation("PDF сохранён: {Path}", pdfPath);
                 return pdfPath;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Conversion failed for {Path}", inputPath);
+                _logger.LogError(ex, "Ошибка конвертации для {Path}", inputPath);
                 return null;
             }
             finally

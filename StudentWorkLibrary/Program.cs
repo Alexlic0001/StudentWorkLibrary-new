@@ -37,8 +37,8 @@ builder.Services.AddCascadingAuthenticationState();
 // Свои сервисы
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IWorkSearchService, WorkSearchService>();
-
 builder.Services.AddScoped<IDocumentConverter, DocumentConverter>();
+builder.Services.AddScoped<IPdfTrimmer, PdfTrimmer>();
 
 // Razor Pages (Login/Logout) + Controllers (Download)
 builder.Services.AddRazorPages();
@@ -51,6 +51,16 @@ using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     await SeedData.InitializeAsync(services);
+}
+
+// Очистка старых временных PDF при старте
+var tempPreview = Path.Combine(app.Environment.WebRootPath, "temp-preview");
+if (Directory.Exists(tempPreview))
+{
+    foreach (var file in Directory.GetFiles(tempPreview, "*.pdf"))
+    {
+        try { File.Delete(file); } catch { }
+    }
 }
 
 if (!app.Environment.IsDevelopment())
