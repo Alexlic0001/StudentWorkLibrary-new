@@ -36,7 +36,8 @@
         <div class="row g-3">
             <div class="col-md-3">
                 <label class="form-label">Тип работы</label>
-                <select class="form-select" @bind="selectedWorkTypeId">
+                @* Добавили @bind:after="Search" *@
+                <select class="form-select" @bind="selectedWorkTypeId" @bind:after="Search">
                     <option value="">Все</option>
                     @foreach (var type in workTypes)
                     {
@@ -46,7 +47,8 @@
             </div>
             <div class="col-md-3">
                 <label class="form-label">ВУЗ</label>
-                <select class="form-select" @bind="selectedInstitutionId">
+                @* Добавили @bind:after="Search" *@
+                <select class="form-select" @bind="selectedInstitutionId" @bind:after="Search">
                     <option value="">Все</option>
                     @foreach (var inst in institutions)
                     {
@@ -56,7 +58,8 @@
             </div>
             <div class="col-md-3">
                 <label class="form-label">Специальность</label>
-                <select class="form-select" @bind="selectedSpecialtyId">
+                @* Добавили @bind:after="Search" *@
+                <select class="form-select" @bind="selectedSpecialtyId" @bind:after="Search">
                     <option value="">Все</option>
                     @foreach (var spec in specialties)
                     {
@@ -66,7 +69,8 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label">Год</label>
-                <input type="number" class="form-control" @bind="selectedYear" placeholder="2024" />
+                @* Добавили @bind:after="Search" *@
+                <input type="number" class="form-control" @bind="selectedYear" @bind:after="Search" placeholder="2024" />
             </div>
             <div class="col-md-1 d-flex align-items-end">
                 <button class="btn btn-outline-secondary w-100" @onclick="ClearFilters" title="Сброс">↺</button>
