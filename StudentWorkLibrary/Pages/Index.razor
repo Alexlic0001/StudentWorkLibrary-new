@@ -8,7 +8,6 @@
 @using StudentWorkLibrary.Models
 @using StudentWorkLibrary.Data
 @using StudentWorkLibrary.Services
-
 @inject IWorkSearchService SearchService
 @inject NavigationManager Navigation
 @inject IDbContextFactory<ApplicationDbContext> DbContextFactory
@@ -17,6 +16,7 @@
 
 <h1>📚 Библиотека студенческих работ</h1>
 
+@* ===== Строка поиска ===== *@
 <div class="row mb-4">
     <div class="col-md-8">
         <input type="text" class="form-control form-control-lg"
@@ -24,7 +24,7 @@
                @bind="searchQuery" @bind:event="oninput" @onkeydown="HandleSearchEnter" />
     </div>
     <div class="col-md-4 d-flex gap-2">
-        <button class="btn btn-primary btn-lg flex-grow-1" @onclick="Search">🔍 Поиск</button>
+        <button class="btn btn-primary btn-lg flex-grow-1" @onclick="ApplyFilters">🔍 Поиск</button>
         <button class="btn btn-outline-secondary btn-lg" @onclick="ClearFilters">Сброс</button>
     </div>
 </div>
@@ -36,8 +36,7 @@
         <div class="row g-3">
             <div class="col-md-3">
                 <label class="form-label">Тип работы</label>
-                @* Добавили @bind:after="Search" *@
-                <select class="form-select" @bind="selectedWorkTypeId" @bind:after="Search">
+                <select class="form-select" @bind="selectedWorkTypeId" @bind:after="ApplyFilters">
                     <option value="">Все</option>
                     @foreach (var type in workTypes)
                     {
@@ -47,8 +46,7 @@
             </div>
             <div class="col-md-3">
                 <label class="form-label">ВУЗ</label>
-                @* Добавили @bind:after="Search" *@
-                <select class="form-select" @bind="selectedInstitutionId" @bind:after="Search">
+                <select class="form-select" @bind="selectedInstitutionId" @bind:after="ApplyFilters">
                     <option value="">Все</option>
                     @foreach (var inst in institutions)
                     {
@@ -58,8 +56,7 @@
             </div>
             <div class="col-md-3">
                 <label class="form-label">Специальность</label>
-                @* Добавили @bind:after="Search" *@
-                <select class="form-select" @bind="selectedSpecialtyId" @bind:after="Search">
+                <select class="form-select" @bind="selectedSpecialtyId" @bind:after="ApplyFilters">
                     <option value="">Все</option>
                     @foreach (var spec in specialties)
                     {
@@ -69,15 +66,18 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label">Год</label>
-                @* Добавили @bind:after="Search" *@
-                <input type="number" class="form-control" @bind="selectedYear" @bind:after="Search" placeholder="2024" />
+                <input type="number" class="form-control" @bind="selectedYear" @bind:after="ApplyFilters" placeholder="2024" />
             </div>
             <div class="col-md-1 d-flex align-items-end">
                 <button class="btn btn-outline-secondary w-100" @onclick="ClearFilters" title="Сброс">↺</button>
             </div>
         </div>
         <div class="mt-2 text-muted small">
-            📊 Всего работ: @works.Count &nbsp;|&nbsp; Всего скачиваний: @works.Sum(w => w.DownloadCount)
+            📊 Всего найдено: @totalCount
+            @if (totalCount > 0)
+            {
+                <span>&nbsp;|&nbsp;Страница @currentPage из @totalPages</span>
+            }
         </div>
     </div>
 </div>
@@ -100,21 +100,21 @@ else
         <table class="table table-hover table-striped align-middle w-100">
             <thead class="table-dark">
                 <tr>
-                    <th style="cursor:pointer; width:50px;" @onclick="() => SortBy(0)">ID</th>
-                    <th style="cursor:pointer;" @onclick="() => SortBy(1)">Название работы</th>
-                    <th style="cursor:pointer; width:120px;" @onclick="() => SortBy(2)">Автор</th>
-                    <th style="cursor:pointer; width:130px;" @onclick="() => SortBy(3)">Тип</th>
+                    <th style="cursor:pointer; width:50px;" @onclick="@(() => SortBy("Id"))">ID @SortIndicator("Id")</th>
+                    <th style="cursor:pointer;" @onclick="@(() => SortBy("Title"))">Название работы @SortIndicator("Title")</th>
+                    <th style="cursor:pointer; width:120px;" @onclick="@(() => SortBy("Author"))">Автор @SortIndicator("Author")</th>
+                    <th style="cursor:pointer; width:130px;" @onclick="@(() => SortBy("WorkType"))">Тип @SortIndicator("WorkType")</th>
                     <th style="width:140px;">Специальность</th>
                     <th style="width:140px;">ВУЗ</th>
-                    <th style="cursor:pointer; width:70px;" @onclick="() => SortBy(4)">Год</th>
-                    <th style="cursor:pointer; width:110px;" @onclick="() => SortBy(5)">Загружено</th>
-                    <th style="cursor:pointer; width:80px;" @onclick="() => SortBy(6)">⬇</th>
+                    <th style="cursor:pointer; width:70px;" @onclick="@(() => SortBy("Year"))">Год @SortIndicator("Year")</th>
+                    <th style="cursor:pointer; width:110px;" @onclick="@(() => SortBy("UploadDate"))">Загружено @SortIndicator("UploadDate")</th>
+                    <th style="cursor:pointer; width:80px;" @onclick="@(() => SortBy("DownloadCount"))">⬇ @SortIndicator("DownloadCount")</th>
                     <th style="width:80px;">Формат</th>
                     <th style="width:@(isAdmin ? "180px" : "110px");">Действия</th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (var work in SortedWorks)
+                @foreach (var work in works)
                 {
                     <tr @key="work.Id">
                         <td>@work.Id</td>
@@ -173,7 +173,6 @@ else
                                     @onclick="() => DownloadWork(work.Id)">
                                 ⬇️
                             </button>
-
                             @if (isAdmin)
                             {
                                 <button class="btn btn-sm btn-outline-warning ms-1"
@@ -194,10 +193,46 @@ else
         </table>
     </div>
 
-    <div class="mt-3 d-flex justify-content-between text-muted">
-        <small>Показано работ: @SortedWorks.Count из @works.Count</small>
-        <small>Всего скачиваний: @works.Sum(w => w.DownloadCount)</small>
-    </div>
+    @* ===== Пагинация ===== *@
+    @if (totalPages > 1)
+    {
+        <nav aria-label="Навигация по страницам" class="mt-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                    Показано @((currentPage - 1) * pageSize + 1)–@((currentPage - 1) * pageSize + works.Count) из @totalCount
+                </small>
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(1)" title="Первая">«</button>
+                    </li>
+                    <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(currentPage - 1)" title="Предыдущая">‹</button>
+                    </li>
+
+                    @foreach (var p in GetPageNumbers())
+                    {
+                        if (p == -1)
+                        {
+                            <li class="page-item disabled"><span class="page-link">…</span></li>
+                        }
+                        else
+                        {
+                            <li class="page-item @(p == currentPage ? "active" : "")">
+                                <button class="page-link" @onclick="() => GoToPage(p)">@p</button>
+                            </li>
+                        }
+                    }
+
+                    <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(currentPage + 1)" title="Следующая">›</button>
+                    </li>
+                    <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(totalPages)" title="Последняя">»</button>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+    }
 }
 
 @* ===== Модальное окно предпросмотра PDF ===== *@
@@ -226,45 +261,35 @@ else
 }
 
 @code {
+    // ===== Параметры поиска =====
     private string searchQuery = "";
     private int? selectedWorkTypeId, selectedInstitutionId, selectedSpecialtyId, selectedYear;
+
+    // ===== Пагинация =====
+    private const int pageSize = 15;
+    private int currentPage = 1;
+    private int totalCount = 0;
+    private int totalPages = 0;
+
+    // ===== Сортировка =====
+    private string sortColumn = "UploadDate";
+    private bool sortAscending = false;
+
+    // ===== Данные =====
     private List<StudentWork> works = new();
     private List<WorkType> workTypes = new();
     private List<Institution> institutions = new();
     private List<Specialty> specialties = new();
+
     private bool isLoading = false;
     private bool isAdmin = false;
 
-    private int sortColumn = 0;
-    private bool sortAscending = false;
-
+    // ===== Предпросмотр =====
     private bool showPreview = false;
     private string previewUrl = "";
     private string previewDownloadUrl = "";
     private string previewTitle = "";
     private int MaxPages = 5;
-
-    private void DownloadTrimmed(int workId)
-        => Navigation.NavigateTo($"/api/download/trimmed/{workId}", true);
-
-    private List<StudentWork> SortedWorks
-    {
-        get
-        {
-            var result = works.ToList();
-            switch (sortColumn)
-            {
-                case 0: result = sortAscending ? result.OrderBy(w => w.Id).ToList() : result.OrderByDescending(w => w.Id).ToList(); break;
-                case 1: result = sortAscending ? result.OrderBy(w => w.Title).ToList() : result.OrderByDescending(w => w.Title).ToList(); break;
-                case 2: result = sortAscending ? result.OrderBy(w => w.Author).ToList() : result.OrderByDescending(w => w.Author).ToList(); break;
-                case 3: result = sortAscending ? result.OrderBy(w => w.WorkType?.Name).ToList() : result.OrderByDescending(w => w.WorkType?.Name).ToList(); break;
-                case 4: result = sortAscending ? result.OrderBy(w => w.Year).ToList() : result.OrderByDescending(w => w.Year).ToList(); break;
-                case 5: result = sortAscending ? result.OrderBy(w => w.UploadDate).ToList() : result.OrderByDescending(w => w.UploadDate).ToList(); break;
-                case 6: result = sortAscending ? result.OrderBy(w => w.DownloadCount).ToList() : result.OrderByDescending(w => w.DownloadCount).ToList(); break;
-            }
-            return result;
-        }
-    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -290,52 +315,131 @@ else
     private async Task Search()
     {
         isLoading = true;
+        StateHasChanged();
         try
         {
-            works = await SearchService.SearchAsync(
+            var result = await SearchService.SearchAsync(
                 searchQuery.Trim(),
                 selectedWorkTypeId,
                 selectedInstitutionId,
                 selectedSpecialtyId,
-                selectedYear);
+                selectedYear,
+                page: currentPage,
+                pageSize: pageSize,
+                sortBy: sortColumn,
+                sortAscending: sortAscending);
+
+            works = result.Items;
+            totalCount = result.TotalCount;
+            totalPages = result.TotalPages;
+
+            if (currentPage > totalPages && totalPages > 0)
+            {
+                currentPage = totalPages;
+                await Search();
+            }
         }
-        finally { isLoading = false; }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApplyFilters()
+    {
+        currentPage = 1;
+        await Search();
     }
 
     private async Task ClearFilters()
     {
         searchQuery = "";
         selectedWorkTypeId = selectedInstitutionId = selectedSpecialtyId = selectedYear = null;
+        sortColumn = "UploadDate";
+        sortAscending = false;
+        currentPage = 1;
         await Search();
     }
 
     private void HandleSearchEnter(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter") _ = Search();
+        if (e.Key == "Enter")
+        {
+            currentPage = 1;
+            _ = Search();
+        }
     }
 
-    private void SortBy(int column)
+    private async Task SortBy(string column)
     {
-        if (sortColumn == column) sortAscending = !sortAscending;
-        else { sortColumn = column; sortAscending = true; }
+        if (sortColumn == column)
+            sortAscending = !sortAscending;
+        else
+        {
+            sortColumn = column;
+            sortAscending = true;
+        }
+        currentPage = 1;
+        await Search();
     }
+
+    private string SortIndicator(string column)
+        => sortColumn == column ? (sortAscending ? "▲" : "▼") : "";
+
+    private async Task GoToPage(int page)
+    {
+        // Выводим в консоль браузера (F12 -> Console) при каждом клике
+        Console.WriteLine($"[DEBUG] Клик по странице: {page}. Текущая: {currentPage}, Всего: {totalPages}");
+    
+        if (page < 1 || page > totalPages || page == currentPage)
+        {
+            Console.WriteLine("[DEBUG] Переход отменён (страница не существует или уже открыта)");
+            return;
+        }
+    
+        currentPage = page;
+        Console.WriteLine("[DEBUG] Вызываем Search() для новой страницы...");
+        await Search();
+    }
+
+    private List<int> GetPageNumbers()
+    {
+        var pages = new List<int>();
+        if (totalPages <= 7)
+        {
+            for (int i = 1; i <= totalPages; i++) pages.Add(i);
+            return pages;
+        }
+
+        pages.Add(1);
+        if (currentPage > 3) pages.Add(-1);
+
+        var start = Math.Max(2, currentPage - 1);
+        var end = Math.Min(totalPages - 1, currentPage + 1);
+
+        for (int i = start; i <= end; i++) pages.Add(i);
+
+        if (currentPage < totalPages - 2) pages.Add(-1);
+        pages.Add(totalPages);
+
+        return pages;
+    }
+
+    private void DownloadTrimmed(int workId)
+        => Navigation.NavigateTo($"/api/download/trimmed/{workId}", true);
 
     private void DownloadWork(int workId)
         => Navigation.NavigateTo($"/api/download/{workId}", true);
 
     private void EditWork(int workId)
-    {
-        // Открываем админ-панель — редактирование работы там
-        Navigation.NavigateTo("/admin/manage");
-    }
+        => Navigation.NavigateTo("/admin/manage");
 
     private async Task DeleteWork(StudentWork work)
     {
         if (!await JSRuntime.InvokeAsync<bool>("confirm",
-                $"Удалить работу «{work.Title}»? Файл на диске останется."))
-        {
+            $"Удалить работу «{work.Title}»? Файл на диске останется."))
             return;
-        }
 
         try
         {
