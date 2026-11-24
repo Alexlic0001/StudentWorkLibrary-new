@@ -32,6 +32,7 @@ public class DownloadController : ControllerBase
 
     /// <summary>
     /// Скачивание оригинала: .docx, .pdf, .pptx — что было загружено. Без обрезки.
+    /// Имя файла формируется как: {Id}_{OriginalFileName}
     /// </summary>
     [HttpGet("{id:int}")]
     public async Task<IActionResult> DownloadFile(int id)
@@ -40,7 +41,6 @@ public class DownloadController : ControllerBase
         {
             await using var context = await _factory.CreateDbContextAsync();
             var work = await context.StudentWorks.FirstOrDefaultAsync(w => w.Id == id);
-
             if (work == null)
                 return NotFound(new { message = "Работа не найдена", id });
 
@@ -55,7 +55,10 @@ public class DownloadController : ControllerBase
 
             var contentType = GetContentType(Path.GetExtension(work.FilePath));
 
-            return PhysicalFile(fullPath, contentType, work.OriginalFileName, enableRangeProcessing: true);
+            // ✅ Добавляем ID в начало имени файла
+            var downloadFileName = $"{work.Id}_{work.OriginalFileName}";
+
+            return PhysicalFile(fullPath, contentType, downloadFileName, enableRangeProcessing: true);
         }
         catch (Exception ex)
         {
@@ -66,6 +69,7 @@ public class DownloadController : ControllerBase
     /// <summary>
     /// Скачивание обрезанного PDF (первые _maxPreviewPages страниц).
     /// Оригинал не изменяется.
+    /// Имя файла формируется как: {Id}_{OriginalFileNameWithoutExtension}_first{N}.pdf
     /// </summary>
     [HttpGet("trimmed/{id:int}")]
     public async Task<IActionResult> DownloadTrimmedPdf(int id)
@@ -74,7 +78,6 @@ public class DownloadController : ControllerBase
         {
             await using var context = await _factory.CreateDbContextAsync();
             var work = await context.StudentWorks.FirstOrDefaultAsync(w => w.Id == id);
-
             if (work == null)
                 return NotFound(new { message = "Работа не найдена", id });
 
@@ -88,8 +91,8 @@ public class DownloadController : ControllerBase
             await context.SaveChangesAsync();
 
             var ext = Path.GetExtension(work.FilePath).ToLowerInvariant();
-
             string? fullPdfPath;
+
             if (ext == ".pdf")
             {
                 fullPdfPath = fullPath;
@@ -117,7 +120,8 @@ public class DownloadController : ControllerBase
                 var trimmedTime = System.IO.File.GetLastWriteTimeUtc(trimmedPdfPath);
                 if (trimmedTime >= fullTime)
                 {
-                    var downloadName = $"{Path.GetFileNameWithoutExtension(work.OriginalFileName)}_first{_maxPreviewPages}.pdf";
+                    // ✅ Добавляем ID в начало имени файла
+                    var downloadName = $"{work.Id}_{Path.GetFileNameWithoutExtension(work.OriginalFileName)}_first{_maxPreviewPages}.pdf";
                     return PhysicalFile(trimmedPdfPath, "application/pdf", downloadName, enableRangeProcessing: true);
                 }
                 try { System.IO.File.Delete(trimmedPdfPath); } catch { }
@@ -127,7 +131,9 @@ public class DownloadController : ControllerBase
             if (trimmed == null)
                 return StatusCode(500, new { message = "Не удалось подготовить PDF" });
 
-            var downloadFileName = $"{Path.GetFileNameWithoutExtension(work.OriginalFileName)}_first{_maxPreviewPages}.pdf";
+            // ✅ Добавляем ID в начало имени файла
+            var downloadFileName = $"{work.Id}_{Path.GetFileNameWithoutExtension(work.OriginalFileName)}_first{_maxPreviewPages}.pdf";
+
             return PhysicalFile(trimmed, "application/pdf", downloadFileName, enableRangeProcessing: true);
         }
         catch (Exception ex)
@@ -147,7 +153,6 @@ public class DownloadController : ControllerBase
         {
             await using var context = await _factory.CreateDbContextAsync();
             var work = await context.StudentWorks.FirstOrDefaultAsync(w => w.Id == id);
-
             if (work == null)
                 return NotFound(new { message = "Работа не найдена", id });
 
@@ -169,7 +174,6 @@ public class DownloadController : ControllerBase
                 var pdfPath = await _converter.ConvertToPdfAsync(fullPath);
                 if (pdfPath == null || !System.IO.File.Exists(pdfPath))
                     return StatusCode(500, new { message = "Не удалось конвертировать файл для предпросмотра" });
-
                 return PhysicalFile(pdfPath, "application/pdf", enableRangeProcessing: true);
             }
 

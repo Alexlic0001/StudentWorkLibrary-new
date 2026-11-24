@@ -40,6 +40,12 @@
             🏛 Вузы и специальности
         </button>
     </li>
+    <li class="nav-item">
+        <button class="nav-link @(tab == "export" ? "active" : "")"
+                @onclick="@(() => tab = "export")">
+            📦 Экспорт
+        </button>
+    </li>
 </ul>
 
 @* ================= ВКЛАДКА: РАБОТЫ ================= *@
@@ -296,6 +302,94 @@
     </div>
 }
 
+@* ================= ВКЛАДКА: ЭКСПОРТ ================= *@
+@if (tab == "export")
+{
+    <div class="card">
+        <div class="card-header bg-info text-white fw-bold">📦 Групповой экспорт работ</div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <strong>ℹ️ Как это работает:</strong><br />
+                Выберите тип работ — и скачайте все файлы одним ZIP-архивом.
+                Архив будет содержать папки <code>originals/</code> (исходные файлы)
+                и <code>previews/</code> (обрезанные PDF-превью, первые @maxPages стр.).
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">Тип работы для экспорта *</label>
+                    <select class="form-select form-select-lg" @bind="exportWorkTypeId"
+                            @bind:after="LoadExportCount">
+                        <option value="0">— Выберите тип —</option>
+                        @foreach (var t in workTypes)
+                        {
+                            <option value="@t.Id">@t.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">Состав архива</label>
+                    <div class="border rounded p-3 bg-light">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox"
+                                   id="chkOriginals" @bind="includeOriginals" />
+                            <label class="form-check-label" for="chkOriginals">
+                                📁 <strong>Оригиналы</strong> (исходные файлы: .docx, .pdf, .pptx и т.д.)
+                            </label>
+                        </div>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox"
+                                   id="chkPreviews" @bind="includePreviews" />
+                            <label class="form-check-label" for="chkPreviews">
+                                📄 <strong>PDF-превью</strong> (обрезанные до первых @maxPages страниц)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr />
+
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    @if (exportWorkTypeId > 0)
+                    {
+                        <span class="badge bg-primary fs-6">
+                            Найдено работ: @exportCount
+                        </span>
+                        @if (exportCount == 0)
+                        {
+                            <span class="text-muted ms-2">Работ данного типа нет</span>
+                        }
+                    }
+                    else
+                    {
+                        <span class="text-muted">Выберите тип работы для начала экспорта</span>
+                    }
+                </div>
+                <button class="btn btn-success btn-lg"
+                        disabled="@(exportWorkTypeId == 0 || (!includeOriginals && !includePreviews) || isExporting)"
+                        @onclick="StartExport">
+                    @(isExporting ? "⏳ Формирование архива..." : "⬇️ Скачать ZIP")
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(exportMessage))
+            {
+                <div class="alert alert-@(isExportError ? "danger" : "success") mt-3">
+                    @exportMessage
+                </div>
+            }
+
+            <div class="alert alert-warning mt-3 small">
+                <strong>⚠️ Внимание:</strong> при экспорте большого количества Office-файлов (.doc, .docx, .ppt, .pptx)
+                потребуется время на их конвертацию в PDF через LibreOffice.
+                Если файлов много — процесс может занять несколько минут.
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private string tab = "works";
     private string? message;
@@ -324,6 +418,16 @@
     private string specName = "";
     private string specCode = "";
     private int specInstitutionId;
+
+    // ===== Экспорт =====
+    private int exportWorkTypeId = 0;
+    private bool includeOriginals = true;
+    private bool includePreviews = true;
+    private int exportCount = 0;
+    private bool isExporting = false;
+    private string? exportMessage;
+    private bool isExportError = false;
+    private int maxPages = 5;
 
     protected override async Task OnInitializedAsync() => await LoadAll();
 
@@ -374,7 +478,6 @@
             ShowErr("Заполните название, тип и специальность.");
             return;
         }
-
         try
         {
             await using var ctx = await DbContextFactory.CreateDbContextAsync();
@@ -389,8 +492,8 @@
             entity.WorkTypeId = editingWork.WorkTypeId;
             entity.SpecialtyId = editingWork.SpecialtyId;
             entity.ModifiedDate = DateTime.UtcNow;
-
             await ctx.SaveChangesAsync();
+
             editingWork = null;
             await LoadAll();
             ShowOk("Работа обновлена.");
@@ -599,6 +702,69 @@
             ShowOk("Специальность удалена.");
         }
         catch (Exception ex) { ShowErr($"Ошибка: {ex.Message}"); }
+    }
+
+    // ---------- Экспорт ----------
+    private async Task LoadExportCount()
+    {
+        exportCount = 0;
+        exportMessage = null;
+        if (exportWorkTypeId == 0) return;
+
+        try
+        {
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            exportCount = await ctx.StudentWorks.CountAsync(w => w.WorkTypeId == exportWorkTypeId);
+        }
+        catch (Exception ex)
+        {
+            exportMessage = $"Ошибка подсчёта: {ex.Message}";
+            isExportError = true;
+        }
+    }
+
+    private async Task StartExport()
+    {
+        if (exportWorkTypeId == 0)
+        {
+            exportMessage = "Выберите тип работы.";
+            isExportError = true;
+            return;
+        }
+        if (!includeOriginals && !includePreviews)
+        {
+            exportMessage = "Выберите хотя бы один вариант: оригиналы или PDF-превью.";
+            isExportError = true;
+            return;
+        }
+
+        isExporting = true;
+        exportMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var url = $"/api/export/zip?workTypeId={exportWorkTypeId}" +
+                      $"&includeOriginals={includeOriginals.ToString().ToLower()}" +
+                      $"&includePreviews={includePreviews.ToString().ToLower()}";
+
+            // Принудительная навигация — браузер скачает файл
+            Navigation.NavigateTo(url, forceLoad: true);
+
+            exportMessage = "✅ Архив формируется и будет скачан браузером. " +
+                            "Если файлов много — подождите, конвертация может занять время.";
+            isExportError = false;
+        }
+        catch (Exception ex)
+        {
+            exportMessage = $"Ошибка запуска экспорта: {ex.Message}";
+            isExportError = true;
+        }
+        finally
+        {
+            isExporting = false;
+            StateHasChanged();
+        }
     }
 
     // Простое подтверждение через JS confirm
