@@ -1,12 +1,15 @@
-﻿using Microsoft.AspNetCore.Components.Forms;
-using Microsoft.AspNetCore.Hosting;
+﻿using Microsoft.AspNetCore.Hosting;
 using System.Text;
 
 namespace StudentWorkLibrary.Services
 {
     public interface IFileService
     {
-        Task<string> SaveFileAsync(IBrowserFile file, string workTypeName, string institutionName, int? year);
+        /// <summary>
+        /// Сохраняет файл из переданного потока на диск.
+        /// Поток должен быть уже прочитан (чтобы можно было посчитать хэш до сохранения).
+        /// </summary>
+        Task<string> SaveFileAsync(Stream fileStream, string originalFileName, string workTypeName, string institutionName, int? year);
     }
 
     public class FileService : IFileService
@@ -14,7 +17,7 @@ namespace StudentWorkLibrary.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ILogger<FileService> _logger;
         private static readonly string[] AllowedExtensions =
-         { ".pdf", ".doc", ".docx", ".zip", ".rar", ".ppt", ".pptx" };
+            { ".pdf", ".doc", ".docx", ".zip", ".rar", ".ppt", ".pptx" };
         private const long MaxFileSize = 104857600; // 100 MB
 
         public FileService(IWebHostEnvironment environment, ILogger<FileService> logger)
@@ -23,29 +26,29 @@ namespace StudentWorkLibrary.Services
             _logger = logger;
         }
 
-        public async Task<string> SaveFileAsync(IBrowserFile file, string workTypeName, string institutionName, int? year)
+        public async Task<string> SaveFileAsync(Stream fileStream, string originalFileName, string workTypeName, string institutionName, int? year)
         {
-            var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+            var ext = Path.GetExtension(originalFileName).ToLowerInvariant();
             if (!AllowedExtensions.Contains(ext))
                 throw new InvalidOperationException($"Недопустимый формат файла. Разрешены: {string.Join(", ", AllowedExtensions)}");
-
-            if (file.Size > MaxFileSize)
-                throw new InvalidOperationException($"Файл превышает допустимый размер ({MaxFileSize / 1048576} MB).");
 
             // ASCII-slug для папок: транслитерация кириллицы + замена недопустимых символов
             var safeWorkType = ToAsciiSlug(workTypeName);
             var safeInstitution = ToAsciiSlug(institutionName);
             var yearFolder = year?.ToString() ?? DateTime.Now.Year.ToString();
-
             var uploadDir = Path.Combine(_environment.WebRootPath, "uploads", safeWorkType, safeInstitution, yearFolder);
+
             Directory.CreateDirectory(uploadDir);
 
             // Безопасное имя файла: только GUID + timestamp + расширение
             var uniqueName = $"{Guid.NewGuid():N}_{DateTime.Now:yyyyMMddHHmmss}{ext}";
             var filePath = Path.Combine(uploadDir, uniqueName);
 
+            // ✅ Сохраняем переданный поток (уже прочитанный в Upload.razor)
             await using var stream = new FileStream(filePath, FileMode.Create);
-            await file.OpenReadStream(MaxFileSize).CopyToAsync(stream);
+            await fileStream.CopyToAsync(stream);
+
+            _logger.LogInformation("Файл сохранён: {Path}", filePath);
 
             // В БД храним относительный путь с прямыми слэшами
             return $"uploads/{safeWorkType}/{safeInstitution}/{yearFolder}/{uniqueName}";
@@ -54,7 +57,6 @@ namespace StudentWorkLibrary.Services
         private static string ToAsciiSlug(string name)
         {
             if (string.IsNullOrWhiteSpace(name)) return "unknown";
-
             var map = new Dictionary<char, string>
             {
                 ['а'] = "a",
@@ -124,7 +126,6 @@ namespace StudentWorkLibrary.Services
                 ['Ю'] = "Yu",
                 ['Я'] = "Ya",
             };
-
             var sb = new StringBuilder();
             foreach (var ch in name)
             {
@@ -135,7 +136,6 @@ namespace StudentWorkLibrary.Services
                 else
                     sb.Append('_');
             }
-
             return sb.ToString().Trim('_');
         }
     }

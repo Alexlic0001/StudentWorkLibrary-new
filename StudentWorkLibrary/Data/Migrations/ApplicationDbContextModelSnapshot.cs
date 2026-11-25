@@ -276,6 +276,9 @@ namespace StudentWorkLibrary.Data.Migrations
                     b.Property<int>("DownloadCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("FileHash")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("FilePath")
                         .IsRequired()
                         .HasColumnType("TEXT");

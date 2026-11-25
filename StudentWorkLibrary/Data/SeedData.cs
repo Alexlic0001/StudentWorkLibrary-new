@@ -19,6 +19,33 @@ namespace StudentWorkLibrary.Data
             // Применяем миграции (создаёт БД, если её нет)
             await context.Database.MigrateAsync();
 
+            // ✅ АВТО-ДОБАВЛЕНИЕ колонки FileHash (если её ещё нет)
+            using (var connection = context.Database.GetDbConnection())
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = "PRAGMA table_info(StudentWorks)";
+                using var reader = await command.ExecuteReaderAsync();
+
+                bool hasFileHash = false;
+                while (await reader.ReadAsync())
+                {
+                    if (reader["name"]?.ToString() == "FileHash")
+                    {
+                        hasFileHash = true;
+                        break;
+                    }
+                }
+
+                if (!hasFileHash)
+                {
+                    await context.Database.ExecuteSqlRawAsync(
+                        "ALTER TABLE StudentWorks ADD COLUMN FileHash TEXT NULL");
+                    logger.LogInformation("✅ Колонка FileHash добавлена в таблицу StudentWorks");
+                }
+            }
+
+
             // ---------- Роли ----------
             string[] roles = { "Admin", "User" };
             foreach (var role in roles)

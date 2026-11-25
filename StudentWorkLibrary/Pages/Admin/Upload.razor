@@ -31,17 +31,14 @@
                 <InputText class="form-control" @bind-Value="newWork.Title" />
                 <ValidationMessage For="@(() => newWork.Title)" />
             </div>
-
             <div class="mb-3">
                 <label class="form-label">Автор</label>
                 <InputText class="form-control" @bind-Value="newWork.Author" />
             </div>
-
             <div class="mb-3">
                 <label class="form-label">Год</label>
                 <InputNumber class="form-control" @bind-Value="newWork.Year" />
             </div>
-
             <div class="mb-3">
                 <label class="form-label">Тип работы *</label>
                 <InputSelect class="form-control" @bind-Value="newWork.WorkTypeId">
@@ -53,7 +50,6 @@
                 </InputSelect>
                 <ValidationMessage For="@(() => newWork.WorkTypeId)" />
             </div>
-
             <div class="mb-3">
                 <label class="form-label">Специальность *</label>
                 <InputSelect class="form-control" @bind-Value="newWork.SpecialtyId">
@@ -66,19 +62,16 @@
                 <ValidationMessage For="@(() => newWork.SpecialtyId)" />
             </div>
         </div>
-
         <div class="col-md-6">
             <div class="mb-3">
                 <label class="form-label">Аннотация</label>
                 <InputTextArea class="form-control" rows="3" @bind-Value="newWork.Abstract" />
             </div>
-
             <div class="mb-3">
                 <label class="form-label">Ключевые слова</label>
                 <InputText class="form-control" @bind-Value="newWork.Keywords" />
                 <small class="text-muted">Через запятую</small>
             </div>
-
             <div class="mb-3">
                 <label class="form-label">Файл *</label>
                 <InputFile class="form-control" OnChange="@OnFileSelected" />
@@ -92,8 +85,20 @@
         </div>
     </div>
 
-    <button type="submit" class="btn btn-primary" disabled="@isUploading">
-        @(isUploading ? "Загрузка..." : "Загрузить работу")
+    <button type="submit" class="btn btn-primary" disabled="@(isUploading)">
+        @if (isCheckingHash)
+        {
+            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+            <text>Проверка файла на дубликаты...</text>
+        }
+        else if (isUploading)
+        {
+            <text>Загрузка...</text>
+        }
+        else
+        {
+            <text>Загрузить работу</text>
+        }
     </button>
 </EditForm>
 
@@ -103,7 +108,10 @@
     private List<Specialty> specialties = new();
     private IBrowserFile? selectedFile;
     private bool isUploading = false;
+    private bool isCheckingHash = false;
     private string? errorMessage;
+
+    private const long MaxFileSize = 104857600; // 100 MB
 
     protected override async Task OnInitializedAsync()
     {
@@ -130,20 +138,73 @@
             return;
         }
 
+        // ✅ Быстрая проверка размера до тяжёлых операций
+        if (selectedFile.Size > MaxFileSize)
+        {
+            errorMessage = $"Файл превышает допустимый размер ({MaxFileSize / 1048576} МБ).";
+            StateHasChanged();
+            return;
+        }
+
         isUploading = true;
+        isCheckingHash = true;
         StateHasChanged();
 
         try
         {
+            // ============================================================
+            // 1. Читаем файл в память (чтобы посчитать хэш и потом сохранить)
+            // ============================================================
+            using var memoryStream = new MemoryStream();
+            await using (var openStream = selectedFile.OpenReadStream(maxAllowedSize: MaxFileSize))
+            {
+                await openStream.CopyToAsync(memoryStream);
+            }
+
+            // ============================================================
+            // 2. Вычисляем SHA-256 хэш содержимого файла
+            // ============================================================
+            memoryStream.Position = 0;
+            string fileHash;
+            using (var sha256 = System.Security.Cryptography.SHA256.Create())
+            {
+                byte[] hashBytes = await sha256.ComputeHashAsync(memoryStream);
+                fileHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+            }
+            Console.WriteLine($"[UPLOAD] SHA-256: {fileHash}");
+
+            // ============================================================
+            // 3. Проверяем БД на дубликаты по хэшу
+            // ============================================================
+            await using var ctx = await DbContextFactory.CreateDbContextAsync();
+            var existingWork = await ctx.StudentWorks
+                .FirstOrDefaultAsync(w => w.FileHash == fileHash);
+
+            if (existingWork != null)
+            {
+                errorMessage = $"⚠️ Дубликат обнаружен! Файл с таким содержимым уже загружен в систему " +
+                               $"(ID: {existingWork.Id}, Название: «{existingWork.Title}»).";
+                return;
+            }
+
+            // ============================================================
+            // 4. Дубликата нет — сбрасываем позицию потока и сохраняем файл
+            // ============================================================
+            memoryStream.Position = 0;
+
             var workType = workTypes.FirstOrDefault(wt => wt.Id == newWork.WorkTypeId);
             var specialty = specialties.FirstOrDefault(s => s.Id == newWork.SpecialtyId);
-
             var workTypeName = workType?.Name ?? "Без_типа";
             var institutionName = specialty?.Institution?.Name ?? "Без_ВУЗа";
             var year = newWork.Year ?? DateTime.Now.Year;
 
-            var filePath = await FileService.SaveFileAsync(selectedFile, workTypeName, institutionName, year);
+            // Сохраняем на диск (передаём поток и имя файла)
+            var filePath = await FileService.SaveFileAsync(
+                memoryStream, selectedFile.Name, workTypeName, institutionName, year);
 
+            // ============================================================
+            // 5. Сохраняем запись в БД (включая хэш)
+            // ============================================================
             var entity = new StudentWork
             {
                 Title = newWork.Title,
@@ -154,27 +215,28 @@
                 FilePath = filePath,
                 OriginalFileName = selectedFile.Name,
                 FileSize = selectedFile.Size,
+                FileHash = fileHash, // ✅ Сохраняем хэш для будущей проверки дубликатов
                 UploadDate = DateTime.UtcNow,
                 DownloadCount = 0,
                 WorkTypeId = newWork.WorkTypeId!.Value,
                 SpecialtyId = newWork.SpecialtyId!.Value
             };
 
-            await using var ctx = await DbContextFactory.CreateDbContextAsync();
             ctx.StudentWorks.Add(entity);
             await ctx.SaveChangesAsync();
 
+            Console.WriteLine($"[UPLOAD] Работа #{entity.Id} успешно загружена. Hash: {fileHash}");
             Navigation.NavigateTo("/", true);
         }
         catch (Exception ex)
         {
             errorMessage = $"Ошибка загрузки: {ex.Message}";
             Console.WriteLine($"[UPLOAD ERROR] {ex}");
-            StateHasChanged();
         }
         finally
         {
             isUploading = false;
+            isCheckingHash = false;
             StateHasChanged();
         }
     }
